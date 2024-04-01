@@ -56,15 +56,16 @@ type Client struct {
 
 	common service
 
-	Apps         *AppsService
-	Builds       *BuildsService
-	Pricing      *PricingService
-	Provisioning *ProvisioningService
-	Publishing   *PublishingService
-	Reporting    *ReportingService
-	Submission   *SubmissionService
-	TestFlight   *TestflightService
-	Users        *UsersService
+	Apps              *AppsService
+	Builds            *BuildsService
+	Pricing           *PricingService
+	Provisioning      *ProvisioningService
+	Publishing        *PublishingService
+	Reporting         *ReportingService
+	Submission        *SubmissionService
+	TestFlight        *TestflightService
+	Users             *UsersService
+	CustomProductPage *AppCustomProductPageService
 }
 
 // NewClient creates a new Client instance.
@@ -96,6 +97,7 @@ func NewClient(httpClient *http.Client) *Client {
 	c.Submission = (*SubmissionService)(&c.common)
 	c.TestFlight = (*TestflightService)(&c.common)
 	c.Users = (*UsersService)(&c.common)
+	c.CustomProductPage = (*AppCustomProductPageService)(&c.common)
 
 	return c
 }

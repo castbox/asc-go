@@ -55,8 +55,12 @@ const (
 	ScreenshotDisplayTypeAppiPhone55 ScreenshotDisplayType = "APP_IPHONE_55"
 	// ScreenshotDisplayTypeAppiPhone58 is a screenshot display type for AppiPhone58.
 	ScreenshotDisplayTypeAppiPhone58 ScreenshotDisplayType = "APP_IPHONE_58"
+	// ScreenshotDisplayTypeAppiPhone61 is a screenshot display type for AppiPhone61.
+	ScreenshotDisplayTypeAppiPhone61 ScreenshotDisplayType = "APP_IPHONE_61"
 	// ScreenshotDisplayTypeAppiPhone65 is a screenshot display type for AppiPhone65.
 	ScreenshotDisplayTypeAppiPhone65 ScreenshotDisplayType = "APP_IPHONE_65"
+	// ScreenshotDisplayTypeAppiPhone67  is a screenshot display type for AppiPhone67.
+	ScreenshotDisplayTypeAppiPhone67 ScreenshotDisplayType = "APP_IPHONE_67"
 	// ScreenshotDisplayTypeAppWatchSeries3 is a screenshot display type for AppWatchSeries3.
 	ScreenshotDisplayTypeAppWatchSeries3 ScreenshotDisplayType = "APP_WATCH_SERIES_3"
 	// ScreenshotDisplayTypeAppWatchSeries4 is a screenshot display type for AppWatchSeries4.
@@ -114,7 +118,7 @@ type AppScreenshotSetRelationships struct {
 // https://developer.apple.com/documentation/appstoreconnectapi/appscreenshotsetcreaterequest/data
 type appScreenshotSetCreateRequest struct {
 	Attributes    appScreenshotSetCreateRequestAttributes    `json:"attributes"`
-	Relationships appScreenshotSetCreateRequestRelationships `json:"relationships"`
+	Relationships appScreenshotSetCreateRequestRelationships `json:"relationships,omitempty"`
 	Type          string                                     `json:"type"`
 }
 
@@ -129,7 +133,9 @@ type appScreenshotSetCreateRequestAttributes struct {
 //
 // https://developer.apple.com/documentation/appstoreconnectapi/appscreenshotsetcreaterequest/data/relationships
 type appScreenshotSetCreateRequestRelationships struct {
-	AppStoreVersionLocalization relationshipDeclaration `json:"appStoreVersionLocalization"`
+	AppStoreVersionLocalization                    *relationshipDeclaration `json:"appStoreVersionLocalization,omitempty"`
+	AppCustomProductPageLocalization               *relationshipDeclaration `json:"appCustomProductPageLocalization,omitempty"`
+	AppStoreVersionExperimentTreatmentLocalization *relationshipDeclaration `json:"appStoreVersionExperimentTreatmentLocalization,omitempty"`
 }
 
 // AppScreenshotSetResponse defines model for AppScreenshotSetResponse.
@@ -202,21 +208,37 @@ func (s *AppsService) GetAppScreenshotSet(ctx context.Context, id string, params
 // CreateAppScreenshotSet adds a new screenshot set to an App Store version localization for a specific screenshot type and display size.
 //
 // https://developer.apple.com/documentation/appstoreconnectapi/create_an_app_screenshot_set
-func (s *AppsService) CreateAppScreenshotSet(ctx context.Context, screenshotDisplayType ScreenshotDisplayType, appStoreVersionLocalizationID string) (*AppScreenshotSetResponse, *Response, error) {
+func (s *AppsService) CreateAppScreenshotSet(ctx context.Context, screenshotDisplayType ScreenshotDisplayType, appStoreVersionLocalizationID, appCustomProductPageLocalizationID, appStoreVersionExperimentTreatmentLocalizationID string) (*AppScreenshotSetResponse, *Response, error) {
 	req := appScreenshotSetCreateRequest{
 		Attributes: appScreenshotSetCreateRequestAttributes{
 			ScreenshotDisplayType: screenshotDisplayType,
 		},
-		Relationships: appScreenshotSetCreateRequestRelationships{
-			AppStoreVersionLocalization: relationshipDeclaration{
-				Data: RelationshipData{
-					ID:   appStoreVersionLocalizationID,
-					Type: "appStoreVersionLocalizations",
-				},
-			},
-		},
 		Type: "appScreenshotSets",
 	}
+
+	if appStoreVersionLocalizationID != "" {
+		req.Relationships.AppStoreVersionLocalization = &relationshipDeclaration{
+			Data: RelationshipData{
+				ID:   appStoreVersionLocalizationID,
+				Type: "appStoreVersionLocalizations",
+			},
+		}
+	} else if appCustomProductPageLocalizationID != "" {
+		req.Relationships.AppCustomProductPageLocalization = &relationshipDeclaration{
+			Data: RelationshipData{
+				ID:   appCustomProductPageLocalizationID,
+				Type: "appCustomProductPageLocalizations",
+			},
+		}
+	} else if appStoreVersionExperimentTreatmentLocalizationID != "" {
+		req.Relationships.AppStoreVersionExperimentTreatmentLocalization = &relationshipDeclaration{
+			Data: RelationshipData{
+				ID:   "",
+				Type: "appStoreVersionExperimentTreatmentLocalizations",
+			},
+		}
+	}
+
 	res := new(AppScreenshotSetResponse)
 	resp, err := s.client.post(ctx, "appScreenshotSets", newRequestBody(req), res)
 
