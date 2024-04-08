@@ -12,12 +12,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cidertool/asc-go/asc"
-	"github.com/cidertool/asc-go/examples/util"
+	"github.com/castbox/asc-go/asc"
+	"github.com/castbox/asc-go/examples/util"
 	"github.com/gogf/gf/v2/encoding/gjson"
 )
 
 var (
+	appid                              = flag.String("appid", "", "ios appid")
 	ppid                               = flag.String("ppid", "", "customProductPageId, can be find from the url query parameter ppid, for example: https://apps.apple.com/us/app/gurutest/id{appid}?ppid={ppid}")
 	customProductPageVersionId         = flag.String("customProductPageVersionId", "", "customProductPageVersionId, can be find from this url: https://appstoreconnect.apple.com/apps/{appid}/distribution/productpages/{customProductPageVersionId}")
 	appCustomProductPageLocalizationId = flag.String("appCustomProductPageLocalizationId", "", "appCustomProductPageLocalizationId")
@@ -44,12 +45,28 @@ func main() {
 
 	// Create the App Store Connect client
 	client := asc.NewClient(auth.Client())
-	customProductPageRes, res, err := client.CustomProductPage.GetAppCustomProductPages(ctx, *ppid, &asc.GetAppCustomProductPagesQuery{})
+	customProductPagesRes, res, err := client.CustomProductPage.GetAllAppCustomProductPagesForAnApp(ctx, *appid, &asc.GetAppCustomProductPagesForAnAppQuery{
+		Include: []string{"appCustomProductPageVersions"},
+	})
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	fmt.Printf("customProductPagesRes: %v\nres: %v\n", gjson.MustEncodeString(customProductPagesRes), res)
+
+	customProductPageRes, res, err := client.CustomProductPage.GetAppCustomProductPage(ctx, *ppid, &asc.GetAppCustomProductPageQuery{})
 	if err != nil {
 		fmt.Println(err)
 		return
 	}
 	fmt.Printf("customProductPageRes: %v\nres: %v\n", gjson.MustEncodeString(customProductPageRes), res)
+
+	customProductPageVersionsRes, res, err := client.CustomProductPage.GetAppCustomProductPageVersionsByAppCustomProductPageId(ctx, *ppid, &asc.GetAppCustomProductPageVersionsByAppCustomProductPagesIdQuery{})
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	fmt.Printf("customProductPageVersionsRes: %v\nres: %v\n", gjson.MustEncodeString(customProductPageVersionsRes), res)
 
 	// 1.Get AppCustomProductPageVersion： 根据customProductPageVersionId获取指定版本的所有语言的信息
 	getAppCustomProductPageVersionsRequest := &asc.GetAppCustomProductPageVersionsRequest{

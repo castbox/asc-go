@@ -30,7 +30,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/cidertool/asc-go/asc"
+	"github.com/castbox/asc-go/asc"
 )
 
 var (

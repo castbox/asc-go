@@ -24,6 +24,16 @@ type AppCustomProductPageVersionResponse struct {
 	Links    DocumentLinks                      `json:"links"`
 }
 
+// AppCustomProductPageVersionsResponse defines model for AppCustomProductPageVersionsResponse.
+//
+// https://developer.apple.com/documentation/appstoreconnectapi/appcustomproductpageversionsresponse
+type AppCustomProductPageVersionsResponse struct {
+	Data     []AppCustomProductPageVersion      `json:"data"`
+	Included []AppCustomProductPageLocalization `json:"included,omitempty"`
+	Links    PagedDocumentLinks                 `json:"links"`
+	Meta     *PagingInformation                 `json:"meta,omitempty"`
+}
+
 // AppCustomProductPageVersion defines model for AppCustomProductPageVersion.
 //
 // https://developer.apple.com/documentation/appstoreconnectapi/appcustomproductpageversion
@@ -65,7 +75,7 @@ type RelationshipsAppCustomProductPage struct {
 type AppCustomProductPageLocalizations struct {
 	Data  []AppCustomProductPageLocalizationsData `json:"data,omitempty"`
 	Links *AppCustomProductPageVersionLinks       `json:"links,omitempty"`
-	Meta  *PaginationMeta                         `json:"meta,omitempty"`
+	Meta  *PagingInformation                      `json:"meta,omitempty"`
 }
 
 // AppCustomProductPageLocalizationsData defines model for AppCustomProductPageLocalizationsData.
