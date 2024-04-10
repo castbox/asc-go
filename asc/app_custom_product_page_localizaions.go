@@ -122,6 +122,34 @@ type GetCustomProductPageLocalizationAppScreenshotSetsRequest struct {
 	FieldsAppStoreVersionLocalizations                    []string `url:"fields[appStoreVersionLocalizations],omitempty"`
 }
 
+// AppCustomProductPageLocalizationInlineCreate defines model for AppCustomProductPageLocalizationInlineCreate
+// https://developer.apple.com/documentation/appstoreconnectapi/appcustomproductpagelocalizationinlinecreate
+type AppCustomProductPageLocalizationInlineCreate struct {
+	Attributes    *AppCustomProductPageLocalizationInlineCreateAttributes    `json:"attributes"`
+	Id            string                                                     `json:"id,omitempty"`
+	Relationships *AppCustomProductPageLocalizationInlineCreateRelationships `json:"relationships,omitempty"`
+	Type          string                                                     `json:"type"`
+}
+
+// AppCustomProductPageLocalizationInlineCreateAttributes defines model for AppCustomProductPageLocalizationInlineCreate.Attributes
+//
+// https://developer.apple.com/documentation/appstoreconnectapi/appcustomproductpagelocalizationinlinecreate/attributes
+type AppCustomProductPageLocalizationInlineCreateAttributes struct {
+	Locale          string `json:"locale"`
+	PromotionalText string `json:"promotionalText"`
+}
+
+// AppCustomProductPageLocalizationInlineCreateRelationships defines model for AppCustomProductPageLocalizationInlineCreate.Relationships
+//
+// https://developer.apple.com/documentation/appstoreconnectapi/appcustomproductpagelocalizationinlinecreate/relationships
+type AppCustomProductPageLocalizationInlineCreateRelationships struct {
+	AppCustomProductPageVersion *RelationShipAppCustomProductPageVersion `json:"appCustomProductPageVersion"`
+}
+
+type RelationShipAppCustomProductPageVersion struct {
+	Data *RelationshipData `json:"data"`
+}
+
 // GetCustomProductPageLocalizationAppScreenshotSets
 //
 // https://developer.apple.com/documentation/appstoreconnectapi/get_v1_appcustomproductpagelocalizations_id_appscreenshotsets
@@ -138,12 +166,12 @@ func (s *AppCustomProductPageService) GetCustomProductPageLocalizationAppScreens
 // CreatAppCustomProductPageLocalization
 //
 // https://developer.apple.com/documentation/appstoreconnectapi/post_v1_appcustomproductpagelocalizations
-func (s *AppCustomProductPageService) CreatAppCustomProductPageLocalization(ctx context.Context, locale, promotionalText, appCustomProductPageVersionId string, appPreviewSet, screenshotSet *PagedRelationship) (*AppCustomProductPageLocalizationResponse, *Response, error) {
+func (s *AppCustomProductPageService) CreatAppCustomProductPageLocalization(ctx context.Context, local, promotionalText, appCustomProductPageVersionId string, appPreviewSet, screenshotSet *PagedRelationship) (*AppCustomProductPageLocalizationResponse, *Response, error) {
 	req := &AppCustomProductPageLocalizationCreateRequest{
 		Data: &AppCustomProductPageLocalizationCreateRequestData{
 			Type: "appCustomProductPageLocalizations",
 			Attributes: &AppCustomProductPageLocalizationAttributes{
-				Locale:          locale,
+				Locale:          local,
 				PromotionalText: promotionalText,
 			},
 			Relationships: &AppCustomProductPageLocalizationRelationships{

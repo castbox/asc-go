@@ -19,6 +19,7 @@ import (
 
 var (
 	appid                              = flag.String("appid", "", "ios appid")
+	cppName                            = flag.String("cppName", "", "custom product page name")
 	ppid                               = flag.String("ppid", "", "customProductPageId, can be find from the url query parameter ppid, for example: https://apps.apple.com/us/app/gurutest/id{appid}?ppid={ppid}")
 	customProductPageVersionId         = flag.String("customProductPageVersionId", "", "customProductPageVersionId, can be find from this url: https://appstoreconnect.apple.com/apps/{appid}/distribution/productpages/{customProductPageVersionId}")
 	appCustomProductPageLocalizationId = flag.String("appCustomProductPageLocalizationId", "", "appCustomProductPageLocalizationId")
@@ -45,6 +46,7 @@ func main() {
 
 	// Create the App Store Connect client
 	client := asc.NewClient(auth.Client())
+	// Get AppCustomProductPages： 获取指定App下的所有CPP页面列表
 	customProductPagesRes, res, err := client.CustomProductPage.GetAllAppCustomProductPagesForAnApp(ctx, *appid, &asc.GetAppCustomProductPagesForAnAppQuery{
 		Include: []string{"appCustomProductPageVersions"},
 	})
@@ -54,6 +56,15 @@ func main() {
 	}
 	fmt.Printf("customProductPagesRes: %v\nres: %v\n", gjson.MustEncodeString(customProductPagesRes), res)
 
+	// Create AppCustomProductPage： 创建新的CPP页面
+	createCustomProductPageRes, res, err := client.CustomProductPage.CreateAppCustomProductPage(ctx, *cppName, *appid, "", nil, nil)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	fmt.Printf("customProductPageRes:%v \nres: %v\n", gjson.MustEncodeString(createCustomProductPageRes), res)
+
+	// Get AppCustomProductPage： 根据customProductPageId获取指定CPP页面的信息
 	customProductPageRes, res, err := client.CustomProductPage.GetAppCustomProductPage(ctx, *ppid, &asc.GetAppCustomProductPageQuery{})
 	if err != nil {
 		fmt.Println(err)
@@ -61,6 +72,7 @@ func main() {
 	}
 	fmt.Printf("customProductPageRes: %v\nres: %v\n", gjson.MustEncodeString(customProductPageRes), res)
 
+	// Get AppCustomProductPageVersions： 根据customProductPageId获取指定CPP页面的CustomProductPageVersions信息
 	customProductPageVersionsRes, res, err := client.CustomProductPage.GetAppCustomProductPageVersionsByAppCustomProductPageId(ctx, *ppid, &asc.GetAppCustomProductPageVersionsByAppCustomProductPagesIdQuery{})
 	if err != nil {
 		fmt.Println(err)

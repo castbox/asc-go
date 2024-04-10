@@ -63,8 +63,65 @@ type AppCustomProductPageRelationshipsVersionsLinks struct {
 	Self    string `json:"self,omitempty"`
 }
 
-type AppCustomProductPageCreateRequest struct {
-	Data *AppCustomProductPage `json:"data"`
+// appCustomProductPageCreateRequest defines model for appCustomProductPageCreateRequest
+//
+// https://developer.apple.com/documentation/appstoreconnectapi/appcustomproductpagecreaterequest
+type appCustomProductPageCreateRequest struct {
+	Data     *AppCustomProductPageCreateRequestData      `json:"data"`
+	Included []AppCustomProductPageCreateRequestIncluded `json:"included"`
+}
+
+type AppCustomProductPageCreateRequestIncluded interface{}
+
+// AppCustomProductPageCreateRequestData defines model for appCustomProductPageCreateRequest.Data
+//
+// https://developer.apple.com/documentation/appstoreconnectapi/appcustomproductpagecreaterequest/data
+type AppCustomProductPageCreateRequestData struct {
+	Attributes    *AppCustomProductPageCreateRequestDataAttributes    `json:"attributes"`
+	Relationships *AppCustomProductPageCreateRequestDataRelationships `json:"relationships"`
+	Type          string                                              `json:"type"`
+}
+
+// AppCustomProductPageCreateRequestDataAttributes defines model for appCustomProductPageCreateRequest.Data.Attributes
+// https://developer.apple.com/documentation/appstoreconnectapi/appcustomproductpagecreaterequest/data/attributes
+type AppCustomProductPageCreateRequestDataAttributes struct {
+	Name string `json:"name"`
+}
+
+// AppCustomProductPageCreateRequestDataRelationships defines model for appCustomProductPageCreateRequest.Data.Relationships
+//
+// https://developer.apple.com/documentation/appstoreconnectapi/appcustomproductpagecreaterequest/data/relationships
+type AppCustomProductPageCreateRequestDataRelationships struct {
+	App                          *AppCustomProductPageCreateRequestDataRelationshipsApp                          `json:"app"`
+	AppCustomProductPageVersions *AppCustomProductPageCreateRequestDataRelationshipsAppCustomProductPageVersions `json:"appCustomProductPageVersions,omitempty"`
+	AppStoreVersionTemplate      *AppCustomProductPageCreateRequestDataRelationshipsAppStoreVersionTemplate      `json:"appStoreVersionTemplate,omitempty"`
+	CustomProductPageTemplate    *AppCustomProductPageCreateRequestDataRelationshipsCustomProductPageTemplate    `json:"customProductPageTemplate,omitempty"`
+}
+
+// AppCustomProductPageCreateRequestDataRelationshipsApp defines model for appCustomProductPageCreateRequest.Data.Relationships.App
+//
+// https://developer.apple.com/documentation/appstoreconnectapi/appcustomproductpagecreaterequest/data/relationships/app
+type AppCustomProductPageCreateRequestDataRelationshipsApp struct {
+	Data *RelationshipData `json:"data"`
+}
+
+// AppCustomProductPageCreateRequestDataRelationshipsAppCustomProductPageVersions defines model for appCustomProductPageCreateRequest.Data.Relationships.AppCustomProductPageVersions
+// https://developer.apple.com/documentation/appstoreconnectapi/appcustomproductpagecreaterequest/data/relationships/appcustomproductpageversions
+type AppCustomProductPageCreateRequestDataRelationshipsAppCustomProductPageVersions struct {
+	Data []*RelationshipData `json:"data,omitempty"`
+}
+
+// AppCustomProductPageCreateRequestDataRelationshipsAppStoreVersionTemplate defines model for appCustomProductPageCreateRequest.Data.Relationships.AppStoreVersionTemplate
+//
+// https://developer.apple.com/documentation/appstoreconnectapi/appcustomproductpagecreaterequest/data/relationships/appstoreversiontemplate
+type AppCustomProductPageCreateRequestDataRelationshipsAppStoreVersionTemplate struct {
+	Data *RelationshipData `json:"data,omitempty"`
+}
+
+// AppCustomProductPageCreateRequestDataRelationshipsCustomProductPageTemplate defines model for appCustomProductPageCreateRequest.Data.Relationships.AppCustomProductPageVersions
+// https://developer.apple.com/documentation/appstoreconnectapi/appcustomproductpagecreaterequest/data/relationships/appcustomproductpageversions
+type AppCustomProductPageCreateRequestDataRelationshipsCustomProductPageTemplate struct {
+	Data *RelationshipData `json:"data,omitempty"`
 }
 
 type GetAppCustomProductPageQuery struct {
@@ -78,9 +135,9 @@ type GetAppCustomProductPageQuery struct {
 //
 // https://developer.apple.com/documentation/appstoreconnectapi/appcustomproductpagesresponse
 type AppCustomProductPageResponse struct {
-	Data     AppCustomProductPage `json:"data"`
-	Included []App                `json:"included,omitempty"`
-	Links    DocumentLinks        `json:"links"`
+	Data     AppCustomProductPage          `json:"data"`
+	Included []AppCustomProductPageVersion `json:"included,omitempty"`
+	Links    DocumentLinks                 `json:"links"`
 }
 
 // AppCustomProductPagesResponse defines model for AppCustomProductPagesResponse.
@@ -149,4 +206,80 @@ func (s *AppCustomProductPageService) GetAppCustomProductPageVersionsByAppCustom
 	res := new(AppCustomProductPageVersionsResponse)
 	resp, err := s.client.get(ctx, url, params, res)
 	return res, resp, err
+}
+
+// CreateAppCustomProductPage create an app custom product page
+//
+// https://developer.apple.com/documentation/appstoreconnectapi/post_v1_appcustomproductpages
+func (s *AppCustomProductPageService) CreateAppCustomProductPage(ctx context.Context, pageName, appid, enPromotionalText string,
+	appStoreVersionTemplateData, customProductPageTemplateData *RelationshipData) (*AppCustomProductPageResponse, *Response, error) {
+	req := &appCustomProductPageCreateRequest{
+		Data: &AppCustomProductPageCreateRequestData{
+			Attributes: &AppCustomProductPageCreateRequestDataAttributes{
+				Name: pageName,
+			},
+			Relationships: &AppCustomProductPageCreateRequestDataRelationships{
+				App: &AppCustomProductPageCreateRequestDataRelationshipsApp{
+					Data: &RelationshipData{
+						ID:   appid,
+						Type: "apps",
+					},
+				},
+				AppCustomProductPageVersions: &AppCustomProductPageCreateRequestDataRelationshipsAppCustomProductPageVersions{
+					Data: []*RelationshipData{
+						{
+							ID:   "${new-appCustomProductPageVersion-id}",
+							Type: "appCustomProductPageVersions",
+						},
+					},
+				},
+				AppStoreVersionTemplate: &AppCustomProductPageCreateRequestDataRelationshipsAppStoreVersionTemplate{
+					Data: appStoreVersionTemplateData,
+				},
+				CustomProductPageTemplate: &AppCustomProductPageCreateRequestDataRelationshipsCustomProductPageTemplate{
+					Data: customProductPageTemplateData,
+				},
+			},
+			Type: "appCustomProductPages",
+		},
+		Included: []AppCustomProductPageCreateRequestIncluded{
+			AppCustomProductPageVersionInlineCreate{
+				Type: "appCustomProductPageVersions",
+				Id:   "${new-appCustomProductPageVersion-id}",
+				Relationships: &AppCustomProductPageVersionInlineCreateRelationships{
+					AppCustomProductPage: nil,
+					AppCustomProductPageLocalizations: &RelationShipAppCustomProductPageLocalizations{
+						Data: []*RelationshipData{
+							{
+								ID:   "${new-appCustomProductPageLocalization-id}",
+								Type: "appCustomProductPageLocalizations",
+							},
+						},
+					},
+				},
+			},
+			AppCustomProductPageLocalizationInlineCreate{
+				Id: "${new-appCustomProductPageLocalization-id}",
+				Attributes: &AppCustomProductPageLocalizationInlineCreateAttributes{
+					Locale:          "en-US",
+					PromotionalText: enPromotionalText,
+				},
+				Type: "appCustomProductPageLocalizations",
+			},
+		},
+	}
+
+	url := "/v1/appCustomProductPages"
+	res := new(AppCustomProductPageResponse)
+	resp, err := s.client.post(ctx, url, newRequestBodyWithIncluded(req.Data, req.Included), res)
+	return res, resp, err
+}
+
+// DeleteAnAppCustomProductPage delete an app custom product page
+//
+// https://developer.apple.com/documentation/appstoreconnectapi/delete_an_app_custom_product_page
+func (s *AppCustomProductPageService) DeleteAnAppCustomProductPage(ctx context.Context, id string) (*Response, error) {
+	url := fmt.Sprintf("/v1/appCustomProductPages/%s", id)
+
+	return s.client.delete(ctx, url, nil)
 }

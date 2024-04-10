@@ -132,7 +132,7 @@ func main() {
 	if len(selectedScreenshotSets) > 0 {
 		selectedScreenshotSet = selectedScreenshotSets[0]
 	} else {
-		newScreenshotSet, _, err := client.Apps.CreateAppScreenshotSet(ctx, screenshotType, selectedLocalization.ID)
+		newScreenshotSet, _, err := client.Apps.CreateAppScreenshotSet(ctx, screenshotType, selectedLocalization.ID, "", "")
 		if err != nil {
 			log.Fatal(err)
 		}

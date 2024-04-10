@@ -79,10 +79,42 @@ type AppCustomProductPageLocalizations struct {
 }
 
 // AppCustomProductPageLocalizationsData defines model for AppCustomProductPageLocalizationsData.
+//
 // https://developer.apple.com/documentation/appstoreconnectapi/appcustomproductpageversion/relationships/appcustomproductpagelocalizations/data
 type AppCustomProductPageLocalizationsData struct {
 	ID   string `json:"id"`
 	Type string `json:"type"`
+}
+
+// AppCustomProductPageVersionInlineCreate defines model for AppCustomProductPageVersionInlineCreate
+//
+// https://developer.apple.com/documentation/appstoreconnectapi/appcustomproductpageversioninlinecreate
+type AppCustomProductPageVersionInlineCreate struct {
+	Id            string                                                `json:"id,omitempty"`
+	Relationships *AppCustomProductPageVersionInlineCreateRelationships `json:"relationships,omitempty"`
+	Type          string                                                `json:"type"`
+}
+
+// AppCustomProductPageVersionInlineCreateRelationships defines model for AppCustomProductPageVersionInlineCreate.Relationships
+//
+// https://developer.apple.com/documentation/appstoreconnectapi/appcustomproductpageversioninlinecreate/relationships
+type AppCustomProductPageVersionInlineCreateRelationships struct {
+	AppCustomProductPage              *RelationShipAppCustomProductPage              `json:"appCustomProductPage,omitempty"`
+	AppCustomProductPageLocalizations *RelationShipAppCustomProductPageLocalizations `json:"appCustomProductPageLocalizations,omitempty"`
+}
+
+// RelationShipAppCustomProductPage defines model for AppCustomProductPageVersionInlineCreate.Relationships.AppCustomProductPage
+//
+// https://developer.apple.com/documentation/appstoreconnectapi/appcustomproductpageversioninlinecreate/relationships/appcustomproductpage
+type RelationShipAppCustomProductPage struct {
+	Data *RelationshipData `json:"data,omitempty"`
+}
+
+// RelationShipAppCustomProductPageLocalizations defines model for AppCustomProductPageVersionInlineCreate.Relationships.AppCustomProductPageLocalizations
+//
+// https://developer.apple.com/documentation/appstoreconnectapi/appcustomproductpageversioninlinecreate/relationships/appcustomproductpagelocalizations
+type RelationShipAppCustomProductPageLocalizations struct {
+	Data []*RelationshipData `json:"data,omitempty"`
 }
 
 // GetAppCustomProductPageVersion get AppCustomProductPageVersions
