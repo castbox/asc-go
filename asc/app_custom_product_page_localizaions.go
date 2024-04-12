@@ -163,15 +163,15 @@ func (s *AppCustomProductPageService) GetCustomProductPageLocalizationAppScreens
 	return res, resp, nil
 }
 
-// CreatAppCustomProductPageLocalization
+// CreateAppCustomProductPageLocalization
 //
 // https://developer.apple.com/documentation/appstoreconnectapi/post_v1_appcustomproductpagelocalizations
-func (s *AppCustomProductPageService) CreatAppCustomProductPageLocalization(ctx context.Context, local, promotionalText, appCustomProductPageVersionId string, appPreviewSet, screenshotSet *PagedRelationship) (*AppCustomProductPageLocalizationResponse, *Response, error) {
+func (s *AppCustomProductPageService) CreateAppCustomProductPageLocalization(ctx context.Context, locale, promotionalText, appCustomProductPageVersionId string, appPreviewSet, screenshotSet *PagedRelationship) (*AppCustomProductPageLocalizationResponse, *Response, error) {
 	req := &AppCustomProductPageLocalizationCreateRequest{
 		Data: &AppCustomProductPageLocalizationCreateRequestData{
 			Type: "appCustomProductPageLocalizations",
 			Attributes: &AppCustomProductPageLocalizationAttributes{
-				Locale:          local,
+				Locale:          locale,
 				PromotionalText: promotionalText,
 			},
 			Relationships: &AppCustomProductPageLocalizationRelationships{

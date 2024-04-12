@@ -106,7 +106,7 @@ func main() {
 	fmt.Printf("appScreenshotsSetsRes: %v\nres: %v\n", gjson.MustEncodeString(appScreenshotsSetsRes), res)
 
 	// 3.Create an App Custom Product Page Localization，获取到appCustomProductPageLocalizationId
-	appCustomProductPageLocalizationRes, res, err := client.CustomProductPage.CreatAppCustomProductPageLocalization(ctx, *locale, "", *customProductPageVersionId, nil, nil)
+	appCustomProductPageLocalizationRes, res, err := client.CustomProductPage.CreateAppCustomProductPageLocalization(ctx, *locale, "", *customProductPageVersionId, nil, nil)
 	if err != nil {
 		fmt.Printf("CreateAppCustomProductPageLocalization err: %v\n", err)
 		return
