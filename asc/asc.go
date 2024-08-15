@@ -66,6 +66,7 @@ type Client struct {
 	TestFlight        *TestflightService
 	Users             *UsersService
 	CustomProductPage *AppCustomProductPageService
+	CustomerReviews   *AppCustomerReviewsService
 }
 
 // NewClient creates a new Client instance.
@@ -98,6 +99,7 @@ func NewClient(httpClient *http.Client) *Client {
 	c.TestFlight = (*TestflightService)(&c.common)
 	c.Users = (*UsersService)(&c.common)
 	c.CustomProductPage = (*AppCustomProductPageService)(&c.common)
+	c.CustomerReviews = (*AppCustomerReviewsService)(&c.common)
 
 	return c
 }
