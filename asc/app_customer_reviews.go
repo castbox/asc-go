@@ -77,11 +77,48 @@ type GetCustomerReviewsQuery struct {
 	Cursor                        string `url:"cursor,omitempty"`
 }
 
+type CustomerReviewResponseV1CreateRequestDataAttributes struct {
+	ResponseBody string `json:"responseBody"`
+}
+
+type CustomerReviewResponseV1CreateRequestRelationships struct {
+	Review struct {
+		Data struct {
+			Id   string `json:"id"`
+			Type string `json:"type"`
+		} `json:"data"`
+	} `json:"review"`
+	Type string
+}
+
+type CustomerReviewResponseV1CreateRequestData struct {
+	Attributes CustomerReviewResponseV1CreateRequestDataAttributes `json:"attributes"`
+	Relationships CustomerReviewResponseV1CreateRequestRelationships `json:"relationships"`
+}
+type CustomerReviewResponseV1CreateRequest struct {
+	Data CustomerReviewResponseV1CreateRequestData `json:"data"`
+}
+
+type CustomerReviewResponseV1Response struct {
+	Data     CustomerReviewResponseV1
+	Links    DocumentLinks
+	Included []CustomerReview
+}
+
 // GetCustomerReviewsForApp gets all customer reviews for a specific app.
 // GET https://api.appstoreconnect.apple.com/v1/apps/{id}/customerReviews
 func (s *AppCustomerReviewsService) GetCustomerReviewsForApp(ctx context.Context, appId string, params *GetCustomerReviewsQuery) (*CustomerReviewsResponse, *Response, error) {
 	url := fmt.Sprintf("/v1/apps/%s/customerReviews", appId)
 	res := new(CustomerReviewsResponse)
 	resp, err := s.client.get(ctx, url, params, res)
+	return res, resp, err
+}
+
+// CreateOrUpdateCustomerReviewResponse Create a response or replace an existing response you wrote to a customer review.
+// POST GET POST https://api.appstoreconnect.apple.com/v1/customerReviewResponses
+func (s *AppCustomerReviewsService) CreateOrUpdateCustomerReviewResponse(ctx context.Context, appId string, params *CustomerReviewResponseV1CreateRequest) (*CustomerReviewResponseV1Response, *Response, error) {
+	url := "/v1/customerReviewResponses"
+	res := new(CustomerReviewResponseV1Response)
+	resp, err := s.client.post(ctx, url, newRequestBody(params), res)
 	return res, resp, err
 }
