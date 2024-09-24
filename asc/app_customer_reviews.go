@@ -82,21 +82,25 @@ type CustomerReviewResponseV1CreateRequestDataAttributes struct {
 }
 
 type CustomerReviewResponseV1CreateRequestRelationships struct {
-	Review struct {
-		Data struct {
-			Id   string `json:"id"`
-			Type string `json:"type"`
-		} `json:"data"`
-	} `json:"review"`
-	Type string
+	Review CustomerReviewResponseV1CreateRequestRelationshipsReview `json:"review"`
 }
 
-type CustomerReviewResponseV1CreateRequestData struct {
-	Attributes CustomerReviewResponseV1CreateRequestDataAttributes `json:"attributes"`
-	Relationships CustomerReviewResponseV1CreateRequestRelationships `json:"relationships"`
+type CustomerReviewResponseV1CreateRequestRelationshipsReview struct {
+	Data struct {
+		Id   string `json:"id"`
+		Type string `json:"type"`
+	} `json:"data"`
 }
+
+//	type CustomerReviewResponseV1CreateRequestData struct {
+//		Attributes    CustomerReviewResponseV1CreateRequestDataAttributes `json:"attributes"`
+//		Relationships CustomerReviewResponseV1CreateRequestRelationships  `json:"relationships"`
+//		Type          string                                              `json:"type"`
+//	}
 type CustomerReviewResponseV1CreateRequest struct {
-	Data CustomerReviewResponseV1CreateRequestData `json:"data"`
+	Attributes    CustomerReviewResponseV1CreateRequestDataAttributes `json:"attributes"`
+	Relationships CustomerReviewResponseV1CreateRequestRelationships  `json:"relationships"`
+	Type          string                                              `json:"type"`
 }
 
 type CustomerReviewResponseV1Response struct {
