@@ -77,6 +77,13 @@ type GetCustomerReviewsQuery struct {
 	Cursor                        string `url:"cursor,omitempty"`
 }
 
+// GetCustomerReviewQuery defines query parameters for getting a specific customer review.
+type GetCustomerReviewQuery struct {
+	FieldsCustomerReviews         string `url:"fields[customerReviews],omitempty"`         // 要返回的客户评论字段
+	FieldsCustomerReviewResponses string `url:"fields[customerReviewResponses],omitempty"` // 要返回的客户评论回复字段
+	Include                       string `url:"include,omitempty"`                         // 包含的相关数据，如评论回复
+}
+
 type CustomerReviewResponseV1CreateRequestDataAttributes struct {
 	ResponseBody string `json:"responseBody"`
 }
@@ -110,6 +117,7 @@ type CustomerReviewResponseV1Response struct {
 }
 
 // GetCustomerReviewsForApp gets all customer reviews for a specific app.
+// https://developer.apple.com/documentation/appstoreconnectapi/get-v1-apps-_id_-customerreviews
 // GET https://api.appstoreconnect.apple.com/v1/apps/{id}/customerReviews
 func (s *AppCustomerReviewsService) GetCustomerReviewsForApp(ctx context.Context, appId string, params *GetCustomerReviewsQuery) (*CustomerReviewsResponse, *Response, error) {
 	url := fmt.Sprintf("/v1/apps/%s/customerReviews", appId)
@@ -119,10 +127,21 @@ func (s *AppCustomerReviewsService) GetCustomerReviewsForApp(ctx context.Context
 }
 
 // CreateOrUpdateCustomerReviewResponse Create a response or replace an existing response you wrote to a customer review.
+// https://developer.apple.com/documentation/appstoreconnectapi/post-v1-customerreviewresponses
 // POST GET POST https://api.appstoreconnect.apple.com/v1/customerReviewResponses
 func (s *AppCustomerReviewsService) CreateOrUpdateCustomerReviewResponse(ctx context.Context, appId string, params *CustomerReviewResponseV1CreateRequest) (*CustomerReviewResponseV1Response, *Response, error) {
 	url := "/v1/customerReviewResponses"
 	res := new(CustomerReviewResponseV1Response)
 	resp, err := s.client.post(ctx, url, newRequestBody(params), res)
+	return res, resp, err
+}
+
+// GetCustomerReview gets information about a specific customer review, including the review content.
+// https://developer.apple.com/documentation/appstoreconnectapi/get-v1-customerreviews-_id_
+// GET https://api.appstoreconnect.apple.com/v1/customerReviews/{id}
+func (s *AppCustomerReviewsService) GetCustomerReview(ctx context.Context, id string, params *GetCustomerReviewQuery) (*CustomerReviewResponse, *Response, error) {
+	url := fmt.Sprintf("/v1/customerReviews/%s", id)
+	res := new(CustomerReviewResponse)
+	resp, err := s.client.get(ctx, url, params, res)
 	return res, resp, err
 }
