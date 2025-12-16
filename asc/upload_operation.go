@@ -68,7 +68,7 @@ func (e UploadOperationError) Error() string {
 }
 
 // chunk returns the bytes in the file from the given offset and with the given length.
-func (op *UploadOperation) chunk(f io.ReadSeeker) (io.Reader, error) {
+func (op *UploadOperation) chunk(f io.ReadSeeker) (*bytes.Buffer, error) {
 	if op.Offset == nil || op.Length == nil {
 		return nil, ErrMissingChunkBounds
 	}
@@ -89,16 +89,22 @@ func (op *UploadOperation) chunk(f io.ReadSeeker) (io.Reader, error) {
 }
 
 // request creates a new http.request instance from the given UploadOperation and buffer.
-func (op *UploadOperation) request(ctx context.Context, data io.Reader) (*http.Request, error) {
+func (op *UploadOperation) request(ctx context.Context, data *bytes.Buffer) (*http.Request, error) {
 	if op.Method == nil || op.URL == nil {
 		return nil, ErrMissingUploadDestination
 	}
 
-	req, err := http.NewRequestWithContext(ctx, *op.Method, *op.URL, data)
+	// Create request with the data bytes directly
+	bodyBytes := data.Bytes()
+	req, err := http.NewRequestWithContext(ctx, *op.Method, *op.URL, bytes.NewReader(bodyBytes))
 	if err != nil {
 		return nil, err
 	}
 
+	// Set Content-Length explicitly - required for CDN uploads
+	req.ContentLength = int64(len(bodyBytes))
+
+	// Set headers from upload operation
 	if op.RequestHeaders != nil {
 		for _, h := range op.RequestHeaders {
 			if h.Name == nil || h.Value == nil {
@@ -116,7 +122,13 @@ func (op *UploadOperation) request(ctx context.Context, data io.Reader) (*http.R
 func (c *Client) Upload(ctx context.Context, ops []UploadOperation, file io.ReadSeeker) error {
 	var wg sync.WaitGroup
 
-	errs := make(chan UploadOperationError)
+	// Use buffered channel to avoid blocking
+	errs := make(chan UploadOperationError, len(ops))
+
+	// Create a single HTTP client for all chunk uploads to reuse connection pool
+	// Use a plain HTTP client for CDN uploads - no auth headers needed
+	// The CDN URL already contains signed parameters
+	plainClient := &http.Client{}
 
 	for i, operation := range ops {
 		chunk, err := operation.chunk(file)
@@ -131,22 +143,27 @@ func (c *Client) Upload(ctx context.Context, ops []UploadOperation, file io.Read
 
 		wg.Add(1)
 
-		go c.uploadChunk(ctx, ops[i], chunk, errs, &wg)
+		go c.uploadChunk(ctx, ops[i], chunk, plainClient, errs, &wg)
 	}
 
+	// Wait for all uploads to complete, then close the channel
 	go func() {
 		wg.Wait()
 		close(errs)
 	}()
 
+	// Collect all errors
+	var firstErr error
 	for err := range errs {
-		return err
+		if firstErr == nil {
+			firstErr = err
+		}
 	}
 
-	return nil
+	return firstErr
 }
 
-func (c *Client) uploadChunk(ctx context.Context, op UploadOperation, chunk io.Reader, errs chan<- UploadOperationError, wg *sync.WaitGroup) {
+func (c *Client) uploadChunk(ctx context.Context, op UploadOperation, chunk *bytes.Buffer, client *http.Client, errs chan<- UploadOperationError, wg *sync.WaitGroup) {
 	defer wg.Done()
 
 	req, err := op.request(ctx, chunk)
@@ -159,11 +176,23 @@ func (c *Client) uploadChunk(ctx context.Context, op UploadOperation, chunk io.R
 		return
 	}
 
-	_, err = c.do(ctx, req, nil)
+	resp, err := client.Do(req)
 	if err != nil {
 		errs <- UploadOperationError{
 			Operation: op,
 			Err:       err,
 		}
+		return
+	}
+	defer resp.Body.Close()
+
+	// Check for non-2xx status codes
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(resp.Body)
+		errs <- UploadOperationError{
+			Operation: op,
+			Err:       errors.New("upload failed with status " + resp.Status + ": " + string(body)),
+		}
+		return
 	}
 }
