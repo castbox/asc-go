@@ -58,6 +58,7 @@ type Client struct {
 
 	Apps              *AppsService
 	Builds            *BuildsService
+	GameCenter        *GameCenterService
 	Pricing           *PricingService
 	Provisioning      *ProvisioningService
 	Publishing        *PublishingService
@@ -91,6 +92,7 @@ func NewClient(httpClient *http.Client) *Client {
 
 	c.Apps = (*AppsService)(&c.common)
 	c.Builds = (*BuildsService)(&c.common)
+	c.GameCenter = (*GameCenterService)(&c.common)
 	c.Pricing = (*PricingService)(&c.common)
 	c.Provisioning = (*ProvisioningService)(&c.common)
 	c.Publishing = (*PublishingService)(&c.common)

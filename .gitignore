@@ -13,6 +13,10 @@
 # Test binary, built with `go test -c`
 *.test
 
+# Example config files with potentially sensitive data
+examples/game_center_achievements/achievements_config.example.json
+examples/game_center_achievements/images/
+
 # Output of the go coverage tool, specifically when used with LiteIDE
 *.out
 
