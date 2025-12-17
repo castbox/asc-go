@@ -2,11 +2,48 @@
 
 This example demonstrates how to create and configure Game Center achievements using the App Store Connect API.
 
+## Table of Contents
+
+- [Prerequisites](#prerequisites)
+- [Verify Credentials](#verify-credentials)
+- [Single Achievement Creation](#single-achievement-creation)
+- [Batch Achievement Creation](#batch-achievement-creation)
+- [Achievement Image Requirements](#achievement-image-requirements)
+- [Achievement Ordering with Position Field](#achievement-ordering-with-position-field)
+- [Troubleshooting](#troubleshooting)
+- [Notes](#notes)
+
 ## Prerequisites
 
 1. An App Store Connect API key (Key ID, Issuer ID, and private key file)
 2. An app with Game Center enabled or ready to be enabled
 3. Achievement images (512x512 PNG format)
+
+## Verify Credentials
+
+Before running the achievement creation scripts, you can verify your API credentials:
+
+```bash
+go run verify_credentials.go \
+  -kid "YOUR_KEY_ID" \
+  -iss "YOUR_ISSUER_ID" \
+  -privatekeypath "/path/to/AuthKey_XXXXXX.p8" \
+  -bundleid "com.example.yourapp"
+```
+
+### Parameters
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `-kid` | Yes | App Store Connect API Key ID |
+| `-iss` | Yes | App Store Connect Issuer ID |
+| `-privatekeypath` | Yes | Path to the private key (.p8 file) |
+| `-bundleid` | No | Bundle ID to verify (optional, will list first app if omitted) |
+
+This tool will:
+1. Validate your authentication configuration
+2. Test the API connection by listing apps
+3. Display the first matching app if credentials are valid
 
 ## Single Achievement Creation
 
@@ -61,6 +98,41 @@ go run batch_create.go \
   -bundleid "com.example.yourapp" \
   -config "achievements_config.json"
 ```
+
+### Parameters
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `-kid` | Yes | App Store Connect API Key ID |
+| `-iss` | Yes | App Store Connect Issuer ID |
+| `-privatekeypath` | Yes | Path to the private key (.p8 file) |
+| `-bundleid` | Yes | Bundle ID of your app |
+| `-config` | Yes | Path to the JSON configuration file |
+| `-resume` | No | Resume mode: skip existing achievements and localizations, only upload missing images (default: false) |
+
+### Resume Mode (Incremental Upload)
+
+Use `-resume=true` to enable incremental upload mode:
+
+```bash
+go run batch_create.go \
+  -kid "YOUR_KEY_ID" \
+  -iss "YOUR_ISSUER_ID" \
+  -privatekeypath "/path/to/AuthKey_XXXXXX.p8" \
+  -bundleid "com.example.yourapp" \
+  -config "achievements_config.json" \
+  -resume=true
+```
+
+In resume mode, the script will:
+1. **Skip existing achievements** - If an achievement with the same vendor identifier already exists, it won't be recreated
+2. **Skip existing localizations** - If a localization for a specific locale already exists, it won't be recreated
+3. **Upload missing images only** - Only upload images for localizations that don't have an image yet
+
+This is useful when:
+- A previous batch upload was interrupted
+- You want to add new localizations or images to existing achievements
+- You want to retry failed image uploads without recreating everything
 
 ### Configuration File Format
 
@@ -173,3 +245,37 @@ Use `position: 0` or omit the field to append at the end:
 ```
 
 **Result**: A, B, C, ..., New Achievement
+
+## Troubleshooting
+
+### Authentication Errors
+
+If you see `401 Unauthorized` or authentication errors:
+
+1. Verify your Key ID and Issuer ID are correct
+2. Ensure the private key file path is valid and the file exists
+3. Check that the API key has the required permissions in App Store Connect
+4. Run `verify_credentials.go` to test your credentials before running other scripts
+
+### Image Upload Errors
+
+- Ensure images are exactly **512x512 pixels**
+- Use **PNG format** only
+- Check file path is correct (relative to config file directory or absolute path)
+- Verify the image file is not corrupted
+
+### Game Center Not Enabled
+
+The script will automatically enable Game Center if needed. If this fails:
+
+1. Manually enable Game Center in App Store Connect
+2. Go to your app → App Store → Game Center
+3. Enable Game Center and save changes
+
+### API Rate Limiting
+
+If you encounter rate limiting errors:
+
+1. Wait a few minutes before retrying
+2. Consider reducing the number of achievements in a single batch
+3. The SDK includes automatic retry with exponential backoff
