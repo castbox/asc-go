@@ -39,6 +39,7 @@ import (
 var (
 	bundleID   = flag.String("bundleid", "", "Bundle ID for an app (required)")
 	configFile = flag.String("config", "", "Path to JSON config file with achievements (required)")
+	resume     = flag.Bool("resume", false, "Resume mode: skip existing achievements and localizations, only upload missing images")
 )
 
 // AchievementConfig represents a single achievement configuration
@@ -156,8 +157,29 @@ func main() {
 	}
 	fmt.Printf("Found %d existing achievement releases\n\n", len(existingReleaseIDs))
 
+	// Build existing achievements map for resume mode
+	existingAchievements := make(map[string]*asc.GameCenterAchievement) // vendorIdentifier -> achievement
+	if *resume {
+		fmt.Println("Resume mode enabled, fetching existing achievements...")
+		existingAchList, _, err := client.GameCenter.ListGameCenterAchievementsForDetail(ctx, gameCenterDetail.Data.ID, &asc.ListGameCenterAchievementsQuery{
+			Limit: 200,
+		})
+		if err != nil {
+			fmt.Printf("Warning: Could not fetch existing achievements: %v\n", err)
+		} else if existingAchList != nil {
+			for i := range existingAchList.Data {
+				ach := &existingAchList.Data[i]
+				if ach.Attributes != nil && ach.Attributes.VendorIdentifier != nil {
+					existingAchievements[*ach.Attributes.VendorIdentifier] = ach
+				}
+			}
+		}
+		fmt.Printf("Found %d existing achievements\n\n", len(existingAchievements))
+	}
+
 	// Create each achievement and collect new release IDs
 	var createdAchievements []string
+	var skippedAchievements []string
 	var newReleases []struct {
 		achievementID string
 		releaseID     string
@@ -166,10 +188,32 @@ func main() {
 	}
 	for i, achConfig := range config.Achievements {
 		fmt.Printf("========================================\n")
-		fmt.Printf("Creating achievement %d/%d: %s\n", i+1, len(config.Achievements), achConfig.ReferenceName)
+		fmt.Printf("Processing achievement %d/%d: %s\n", i+1, len(config.Achievements), achConfig.ReferenceName)
 		fmt.Printf("========================================\n")
 
-		achievementID, releaseID, err := createAchievementWithRelease(ctx, client, gameCenterDetail.Data.ID, gameCenterGroupID, achConfig)
+		var achievementID, releaseID string
+		var err error
+
+		// Check if achievement already exists (resume mode)
+		if *resume {
+			if existingAch, ok := existingAchievements[achConfig.VendorIdentifier]; ok {
+				achievementID = existingAch.ID
+				fmt.Printf("  Achievement already exists (ID: %s), checking localizations...\n", achievementID)
+
+				// Process localizations for existing achievement
+				err = processLocalizationsForExistingAchievement(ctx, client, achievementID, achConfig.Localizations)
+				if err != nil {
+					log.Printf("Failed to process localizations for %s: %s", achConfig.ReferenceName, err)
+					continue
+				}
+				skippedAchievements = append(skippedAchievements, achievementID)
+				fmt.Printf("Achievement processed (resume mode): %s\n\n", achievementID)
+				continue
+			}
+		}
+
+		// Create new achievement
+		achievementID, releaseID, err = createAchievementWithRelease(ctx, client, gameCenterDetail.Data.ID, gameCenterGroupID, achConfig)
 		if err != nil {
 			log.Printf("Failed to create achievement %s: %s", achConfig.ReferenceName, err)
 			continue
@@ -240,8 +284,11 @@ func main() {
 	fmt.Println("========================================")
 	fmt.Printf("Total achievements in config: %d\n", len(config.Achievements))
 	fmt.Printf("Successfully created: %d\n", len(createdAchievements))
+	if *resume {
+		fmt.Printf("Skipped (already existed): %d\n", len(skippedAchievements))
+	}
 	fmt.Printf("Releases created: %d\n", len(newReleases))
-	fmt.Printf("Failed: %d\n", len(config.Achievements)-len(createdAchievements))
+	fmt.Printf("Failed: %d\n", len(config.Achievements)-len(createdAchievements)-len(skippedAchievements))
 	fmt.Println("========================================")
 }
 
@@ -257,6 +304,78 @@ func loadConfig(path string) (*BatchConfig, error) {
 	}
 
 	return &config, nil
+}
+
+// processLocalizationsForExistingAchievement handles localizations for an achievement that already exists
+// It checks which localizations exist and which need images, then only uploads missing images
+func processLocalizationsForExistingAchievement(ctx context.Context, client *asc.Client, achievementID string, localizations []LocalizationConfig) error {
+	// Get existing localizations for this achievement
+	existingLocs, _, err := client.GameCenter.ListGameCenterAchievementLocalizationsForAchievement(ctx, achievementID, &asc.ListGameCenterAchievementLocalizationsQuery{
+		Limit:   200,
+		Include: []string{"gameCenterAchievementImage"},
+	})
+	if err != nil {
+		return fmt.Errorf("failed to list existing localizations: %w", err)
+	}
+
+	// Build map of existing localizations: locale -> localization
+	existingLocMap := make(map[string]*asc.GameCenterAchievementLocalization)
+	for i := range existingLocs.Data {
+		loc := &existingLocs.Data[i]
+		if loc.Attributes != nil && loc.Attributes.Locale != nil {
+			existingLocMap[*loc.Attributes.Locale] = loc
+		}
+	}
+	fmt.Printf("  Found %d existing localizations\n", len(existingLocMap))
+
+	// Process each localization from config
+	for _, locConfig := range localizations {
+		existingLoc, exists := existingLocMap[locConfig.Locale]
+
+		if !exists {
+			// Localization doesn't exist, create it
+			fmt.Printf("  Creating missing localization: %s\n", locConfig.Locale)
+			newLoc, _, locErr := client.GameCenter.CreateGameCenterAchievementLocalization(ctx, asc.GameCenterAchievementLocalizationCreateRequestAttributes{
+				Locale:                  locConfig.Locale,
+				Name:                    locConfig.Name,
+				BeforeEarnedDescription: locConfig.BeforeEarnedDescription,
+				AfterEarnedDescription:  locConfig.AfterEarnedDescription,
+			}, achievementID)
+			if locErr != nil {
+				return fmt.Errorf("failed to create localization for %s: %w", locConfig.Locale, locErr)
+			}
+			fmt.Printf("    Localization ID: %s\n", newLoc.Data.ID)
+
+			// Upload image if provided
+			if locConfig.ImageFile != "" {
+				fmt.Printf("    Uploading image: %s\n", locConfig.ImageFile)
+				if imgErr := uploadImage(ctx, client, newLoc.Data.ID, locConfig.ImageFile); imgErr != nil {
+					return fmt.Errorf("failed to upload image for %s: %w", locConfig.Locale, imgErr)
+				}
+				fmt.Println("    Image uploaded successfully")
+			}
+		} else {
+			// Localization exists, check if image is missing
+			hasImage := existingLoc.Relationships != nil &&
+				existingLoc.Relationships.GameCenterAchievementImage != nil &&
+				existingLoc.Relationships.GameCenterAchievementImage.Data != nil &&
+				existingLoc.Relationships.GameCenterAchievementImage.Data.ID != ""
+
+			if !hasImage && locConfig.ImageFile != "" {
+				fmt.Printf("  Localization %s exists but missing image, uploading...\n", locConfig.Locale)
+				if imgErr := uploadImage(ctx, client, existingLoc.ID, locConfig.ImageFile); imgErr != nil {
+					return fmt.Errorf("failed to upload image for %s: %w", locConfig.Locale, imgErr)
+				}
+				fmt.Println("    Image uploaded successfully")
+			} else if hasImage {
+				fmt.Printf("  Localization %s: OK (has image)\n", locConfig.Locale)
+			} else {
+				fmt.Printf("  Localization %s: OK (no image configured)\n", locConfig.Locale)
+			}
+		}
+	}
+
+	return nil
 }
 
 func createAchievementWithRelease(ctx context.Context, client *asc.Client, gameCenterDetailID string, gameCenterGroupID string, config AchievementConfig) (achievementID string, releaseID string, err error) {
