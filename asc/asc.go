@@ -342,7 +342,8 @@ func (c *Client) newRequest(ctx context.Context, method string, path string, bod
 }
 
 func (c *Client) do(ctx context.Context, req *http.Request, v interface{}) (*Response, error) {
-	respCh := make(chan *http.Response, 1)
+	var resp *http.Response
+
 	op := func() error {
 		if c.httpDebug {
 			if dump, err := httputil.DumpRequest(req, true); err == nil {
@@ -350,7 +351,8 @@ func (c *Client) do(ctx context.Context, req *http.Request, v interface{}) (*Res
 			}
 		}
 
-		resp, err := c.client.Do(req) // nolint: bodyclose
+		var err error
+		resp, err = c.client.Do(req) // nolint: bodyclose
 		if err != nil {
 			select {
 			case <-ctx.Done():
@@ -366,8 +368,6 @@ func (c *Client) do(ctx context.Context, req *http.Request, v interface{}) (*Res
 			}
 		}
 
-		respCh <- resp
-
 		return nil
 	}
 
@@ -379,7 +379,9 @@ func (c *Client) do(ctx context.Context, req *http.Request, v interface{}) (*Res
 
 	err := backoff.RetryNotify(op, backoff.NewExponentialBackOff(), notify)
 
-	resp := <-respCh
+	if resp == nil {
+		return nil, err
+	}
 
 	defer closeDesc(resp.Body)
 
