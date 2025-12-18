@@ -109,10 +109,11 @@ go run batch_create.go \
 | `-bundleid` | Yes | Bundle ID of your app |
 | `-config` | Yes | Path to the JSON configuration file |
 | `-resume` | No | Resume mode: skip existing achievements and localizations, only upload missing images (default: false) |
+| `-concurrency` | No | Number of concurrent localization/image uploads (default: 10) |
 
-### Resume Mode (Incremental Upload)
+### Concurrent Upload
 
-Use `-resume=true` to enable incremental upload mode:
+The script supports concurrent uploads to speed up the process. By default, it uses 10 concurrent workers with rate limiting (4 requests/second) to avoid hitting Apple's API rate limits.
 
 ```bash
 go run batch_create.go \
@@ -121,7 +122,24 @@ go run batch_create.go \
   -privatekeypath "/path/to/AuthKey_XXXXXX.p8" \
   -bundleid "com.example.yourapp" \
   -config "achievements_config.json" \
-  -resume=true
+  -concurrency 15
+```
+
+**Rate Limiting**: The script automatically limits API requests to ~4 requests/second to stay within Apple's undocumented per-minute limit (~300 requests/minute).
+
+### Resume Mode (Incremental Upload)
+
+Use `-resume=true` to enable incremental upload mode. Resume mode also supports concurrent uploads with the `-concurrency` parameter:
+
+```bash
+go run batch_create.go \
+  -kid "YOUR_KEY_ID" \
+  -iss "YOUR_ISSUER_ID" \
+  -privatekeypath "/path/to/AuthKey_XXXXXX.p8" \
+  -bundleid "com.example.yourapp" \
+  -config "achievements_config.json" \
+  -resume=true \
+  -concurrency 15
 ```
 
 In resume mode, the script will:

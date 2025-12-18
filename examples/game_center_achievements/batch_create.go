@@ -31,16 +31,23 @@ import (
 	"io"
 	"log"
 	"os"
+	"sync"
 
 	"github.com/castbox/asc-go/asc"
 	"github.com/castbox/asc-go/examples/util"
+	"golang.org/x/sync/errgroup"
+	"golang.org/x/time/rate"
 )
 
 var (
-	bundleID   = flag.String("bundleid", "", "Bundle ID for an app (required)")
-	configFile = flag.String("config", "", "Path to JSON config file with achievements (required)")
-	resume     = flag.Bool("resume", false, "Resume mode: skip existing achievements and localizations, only upload missing images")
+	bundleID    = flag.String("bundleid", "", "Bundle ID for an app (required)")
+	configFile  = flag.String("config", "", "Path to JSON config file with achievements (required)")
+	resume      = flag.Bool("resume", false, "Resume mode: skip existing achievements and localizations, only upload missing images")
+	concurrency = flag.Int("concurrency", 10, "Number of concurrent localization/image uploads (default: 10)")
 )
+
+// rateLimiter limits API requests to 4 per second to avoid hitting the undocumented per-minute limit (~300/min)
+var rateLimiter = rate.NewLimiter(rate.Limit(4), 10)
 
 // AchievementConfig represents a single achievement configuration
 type AchievementConfig struct {
@@ -328,52 +335,91 @@ func processLocalizationsForExistingAchievement(ctx context.Context, client *asc
 	}
 	fmt.Printf("  Found %d existing localizations\n", len(existingLocMap))
 
-	// Process each localization from config
+	// Process each localization from config concurrently
+	fmt.Printf("  Processing %d localizations concurrently (concurrency=%d)...\n", len(localizations), *concurrency)
+
+	g, gCtx := errgroup.WithContext(ctx)
+	g.SetLimit(*concurrency)
+
+	var mu sync.Mutex
+
 	for _, locConfig := range localizations {
+		locConfig := locConfig // capture loop variable
 		existingLoc, exists := existingLocMap[locConfig.Locale]
 
-		if !exists {
-			// Localization doesn't exist, create it
-			fmt.Printf("  Creating missing localization: %s\n", locConfig.Locale)
-			newLoc, _, locErr := client.GameCenter.CreateGameCenterAchievementLocalization(ctx, asc.GameCenterAchievementLocalizationCreateRequestAttributes{
-				Locale:                  locConfig.Locale,
-				Name:                    locConfig.Name,
-				BeforeEarnedDescription: locConfig.BeforeEarnedDescription,
-				AfterEarnedDescription:  locConfig.AfterEarnedDescription,
-			}, achievementID)
-			if locErr != nil {
-				return fmt.Errorf("failed to create localization for %s: %w", locConfig.Locale, locErr)
-			}
-			fmt.Printf("    Localization ID: %s\n", newLoc.Data.ID)
-
-			// Upload image if provided
-			if locConfig.ImageFile != "" {
-				fmt.Printf("    Uploading image: %s\n", locConfig.ImageFile)
-				if imgErr := uploadImage(ctx, client, newLoc.Data.ID, locConfig.ImageFile); imgErr != nil {
-					return fmt.Errorf("failed to upload image for %s: %w", locConfig.Locale, imgErr)
+		g.Go(func() error {
+			if !exists {
+				// Localization doesn't exist, create it
+				if err := rateLimiter.Wait(gCtx); err != nil {
+					return fmt.Errorf("rate limiter error for %s: %w", locConfig.Locale, err)
 				}
-				fmt.Println("    Image uploaded successfully")
-			}
-		} else {
-			// Localization exists, check if image is missing
-			hasImage := existingLoc.Relationships != nil &&
-				existingLoc.Relationships.GameCenterAchievementImage != nil &&
-				existingLoc.Relationships.GameCenterAchievementImage.Data != nil &&
-				existingLoc.Relationships.GameCenterAchievementImage.Data.ID != ""
 
-			if !hasImage && locConfig.ImageFile != "" {
-				fmt.Printf("  Localization %s exists but missing image, uploading...\n", locConfig.Locale)
-				if imgErr := uploadImage(ctx, client, existingLoc.ID, locConfig.ImageFile); imgErr != nil {
-					return fmt.Errorf("failed to upload image for %s: %w", locConfig.Locale, imgErr)
+				newLoc, _, locErr := client.GameCenter.CreateGameCenterAchievementLocalization(gCtx, asc.GameCenterAchievementLocalizationCreateRequestAttributes{
+					Locale:                  locConfig.Locale,
+					Name:                    locConfig.Name,
+					BeforeEarnedDescription: locConfig.BeforeEarnedDescription,
+					AfterEarnedDescription:  locConfig.AfterEarnedDescription,
+				}, achievementID)
+				if locErr != nil {
+					return fmt.Errorf("failed to create localization for %s: %w", locConfig.Locale, locErr)
 				}
-				fmt.Println("    Image uploaded successfully")
-			} else if hasImage {
-				fmt.Printf("  Localization %s: OK (has image)\n", locConfig.Locale)
+
+				mu.Lock()
+				fmt.Printf("    [%s] Created localization ID: %s\n", locConfig.Locale, newLoc.Data.ID)
+				mu.Unlock()
+
+				// Upload image if provided
+				if locConfig.ImageFile != "" {
+					if err := rateLimiter.Wait(gCtx); err != nil {
+						return fmt.Errorf("rate limiter error for image %s: %w", locConfig.Locale, err)
+					}
+
+					if imgErr := uploadImage(gCtx, client, newLoc.Data.ID, locConfig.ImageFile); imgErr != nil {
+						return fmt.Errorf("failed to upload image for %s: %w", locConfig.Locale, imgErr)
+					}
+
+					mu.Lock()
+					fmt.Printf("    [%s] Image uploaded successfully\n", locConfig.Locale)
+					mu.Unlock()
+				}
 			} else {
-				fmt.Printf("  Localization %s: OK (no image configured)\n", locConfig.Locale)
+				// Localization exists, check if image is missing
+				hasImage := existingLoc.Relationships != nil &&
+					existingLoc.Relationships.GameCenterAchievementImage != nil &&
+					existingLoc.Relationships.GameCenterAchievementImage.Data != nil &&
+					existingLoc.Relationships.GameCenterAchievementImage.Data.ID != ""
+
+				if !hasImage && locConfig.ImageFile != "" {
+					if err := rateLimiter.Wait(gCtx); err != nil {
+						return fmt.Errorf("rate limiter error for image %s: %w", locConfig.Locale, err)
+					}
+
+					if imgErr := uploadImage(gCtx, client, existingLoc.ID, locConfig.ImageFile); imgErr != nil {
+						return fmt.Errorf("failed to upload image for %s: %w", locConfig.Locale, imgErr)
+					}
+
+					mu.Lock()
+					fmt.Printf("    [%s] Missing image uploaded successfully\n", locConfig.Locale)
+					mu.Unlock()
+				} else if hasImage {
+					mu.Lock()
+					fmt.Printf("    [%s] OK (has image)\n", locConfig.Locale)
+					mu.Unlock()
+				} else {
+					mu.Lock()
+					fmt.Printf("    [%s] OK (no image configured)\n", locConfig.Locale)
+					mu.Unlock()
+				}
 			}
-		}
+			return nil
+		})
 	}
+
+	if err := g.Wait(); err != nil {
+		return err
+	}
+
+	fmt.Println("  All localizations processed successfully")
 
 	return nil
 }
@@ -411,30 +457,66 @@ func createAchievementWithRelease(ctx context.Context, client *asc.Client, gameC
 		fmt.Printf("  Release ID: %s\n", releaseID)
 	}
 
-	// 3. Create localizations
-	for _, locConfig := range config.Localizations {
-		fmt.Printf("  Creating localization: %s\n", locConfig.Locale)
-		localization, _, locErr := client.GameCenter.CreateGameCenterAchievementLocalization(ctx, asc.GameCenterAchievementLocalizationCreateRequestAttributes{
-			Locale:                  locConfig.Locale,
-			Name:                    locConfig.Name,
-			BeforeEarnedDescription: locConfig.BeforeEarnedDescription,
-			AfterEarnedDescription:  locConfig.AfterEarnedDescription,
-		}, achievement.Data.ID)
-		if locErr != nil {
-			return "", "", fmt.Errorf("failed to create localization for %s: %w", locConfig.Locale, locErr)
-		}
-		fmt.Printf("    Localization ID: %s\n", localization.Data.ID)
+	// 3. Create localizations concurrently
+	fmt.Printf("  Creating %d localizations concurrently (concurrency=%d)...\n", len(config.Localizations), *concurrency)
 
-		// 4. Upload image if provided
-		if locConfig.ImageFile != "" {
-			fmt.Printf("    Uploading image: %s\n", locConfig.ImageFile)
-			if imgErr := uploadImage(ctx, client, localization.Data.ID, locConfig.ImageFile); imgErr != nil {
-				return "", "", fmt.Errorf("failed to upload image for %s: %w", locConfig.Locale, imgErr)
+	g, gCtx := errgroup.WithContext(ctx)
+	g.SetLimit(*concurrency)
+
+	var mu sync.Mutex
+	var successCount int
+
+	for _, locConfig := range config.Localizations {
+		locConfig := locConfig // capture loop variable
+		g.Go(func() error {
+			// Rate limit to avoid API throttling
+			if err := rateLimiter.Wait(gCtx); err != nil {
+				return fmt.Errorf("rate limiter error for %s: %w", locConfig.Locale, err)
 			}
-			fmt.Println("    Image uploaded successfully")
-		}
+
+			localization, _, locErr := client.GameCenter.CreateGameCenterAchievementLocalization(gCtx, asc.GameCenterAchievementLocalizationCreateRequestAttributes{
+				Locale:                  locConfig.Locale,
+				Name:                    locConfig.Name,
+				BeforeEarnedDescription: locConfig.BeforeEarnedDescription,
+				AfterEarnedDescription:  locConfig.AfterEarnedDescription,
+			}, achievement.Data.ID)
+			if locErr != nil {
+				return fmt.Errorf("failed to create localization for %s: %w", locConfig.Locale, locErr)
+			}
+
+			mu.Lock()
+			fmt.Printf("    [%s] Localization ID: %s\n", locConfig.Locale, localization.Data.ID)
+			mu.Unlock()
+
+			// Upload image if provided
+			if locConfig.ImageFile != "" {
+				// Rate limit for image upload API calls
+				if err := rateLimiter.Wait(gCtx); err != nil {
+					return fmt.Errorf("rate limiter error for image %s: %w", locConfig.Locale, err)
+				}
+
+				if imgErr := uploadImage(gCtx, client, localization.Data.ID, locConfig.ImageFile); imgErr != nil {
+					return fmt.Errorf("failed to upload image for %s: %w", locConfig.Locale, imgErr)
+				}
+
+				mu.Lock()
+				fmt.Printf("    [%s] Image uploaded successfully\n", locConfig.Locale)
+				mu.Unlock()
+			}
+
+			mu.Lock()
+			successCount++
+			mu.Unlock()
+
+			return nil
+		})
 	}
 
+	if err := g.Wait(); err != nil {
+		return "", "", err
+	}
+
+	fmt.Printf("  All %d localizations created successfully\n", successCount)
 	return achievement.Data.ID, releaseID, nil
 }
 
