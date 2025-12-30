@@ -30,8 +30,11 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math/rand"
 	"os"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/castbox/asc-go/asc"
 	"github.com/castbox/asc-go/examples/util"
@@ -43,11 +46,21 @@ var (
 	bundleID    = flag.String("bundleid", "", "Bundle ID for an app (required)")
 	configFile  = flag.String("config", "", "Path to JSON config file with achievements (required)")
 	resume      = flag.Bool("resume", false, "Resume mode: skip existing achievements and localizations, only upload missing images")
-	concurrency = flag.Int("concurrency", 10, "Number of concurrent localization/image uploads (default: 10)")
+	concurrency = flag.Int("concurrency", 5, "Number of concurrent localization/image uploads (default: 5)")
 )
 
-// rateLimiter limits API requests to 4 per second to avoid hitting the undocumented per-minute limit (~300/min)
-var rateLimiter = rate.NewLimiter(rate.Limit(4), 10)
+// rateLimiter limits API requests based on App Store Connect API official limits:
+// - Documented: 3600 requests/hour
+// - Undocumented: ~300-350 requests/minute (discovered by community)
+// Setting to 4.5 req/s = 270 req/min to stay safely under the 300/min limit
+var rateLimiter = rate.NewLimiter(rate.Limit(4.5), 10)
+
+// Retry configuration for handling rate limit errors
+const (
+	maxRetries     = 5
+	initialBackoff = 5 * time.Second
+	maxBackoff     = 60 * time.Second
+)
 
 // AchievementConfig represents a single achievement configuration
 type AchievementConfig struct {
@@ -184,6 +197,71 @@ func main() {
 
 	// Summary
 	printSummary(len(config.Achievements), len(createdAchievements), len(skippedAchievements), len(newReleases), failedAchievements, *resume)
+}
+
+// is429Error checks if an error is a rate limit (429) error
+func is429Error(err error) bool {
+	if err == nil {
+		return false
+	}
+	errorStr := err.Error()
+	return strings.Contains(errorStr, "429") || strings.Contains(errorStr, "RATE_LIMIT_EXCEEDED")
+}
+
+// retryWithBackoff retries an operation with exponential backoff on 429 errors
+func retryWithBackoff(ctx context.Context, operationName string, operation func() error) error {
+	backoff := initialBackoff
+
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		err := operation()
+		if err == nil {
+			return nil
+		}
+
+		// Check if it's a 429 error
+		if is429Error(err) {
+			if attempt == maxRetries-1 {
+				return fmt.Errorf("%s: max retries (%d) exceeded: %w", operationName, maxRetries, err)
+			}
+
+			// Calculate wait time: wait until next clock minute + small buffer
+			now := time.Now()
+			nextMinute := now.Truncate(time.Minute).Add(time.Minute)
+			waitUntilNextMinute := time.Until(nextMinute) + 2*time.Second // 2s buffer
+
+			// Use exponential backoff or wait until next minute, whichever is shorter
+			waitTime := backoff
+			if waitUntilNextMinute < backoff {
+				waitTime = waitUntilNextMinute
+			}
+
+			// Add jitter to avoid thundering herd
+			jitter := time.Duration(rand.Intn(1000)) * time.Millisecond
+			waitTime += jitter
+
+			log.Printf("[RETRY] %s: Rate limit (429) hit, waiting %v before retry %d/%d",
+				operationName, waitTime, attempt+1, maxRetries)
+
+			select {
+			case <-time.After(waitTime):
+				// Continue to next retry
+			case <-ctx.Done():
+				return fmt.Errorf("%s: context cancelled during retry: %w", operationName, ctx.Err())
+			}
+
+			// Increase backoff for next attempt
+			backoff = backoff * 2
+			if backoff > maxBackoff {
+				backoff = maxBackoff
+			}
+			continue
+		}
+
+		// Not a 429 error, return immediately
+		return fmt.Errorf("%s: %w", operationName, err)
+	}
+
+	return fmt.Errorf("%s: max retries exceeded", operationName)
 }
 
 func loadConfig(path string) (*BatchConfig, error) {
@@ -404,11 +482,17 @@ func isImageUploadComplete(imageInfo *asc.GameCenterAchievementImageResponse, er
 
 // verifyAndHandleImage verifies if an image was successfully uploaded and re-uploads if necessary
 func verifyAndHandleImage(ctx context.Context, client *asc.Client, imageID string, localizationID string, imagePath string, locale string, mu *sync.Mutex) error {
-	if err := rateLimiter.Wait(ctx); err != nil {
-		return fmt.Errorf("rate limiter error for getting image: %w", err)
-	}
+	var imageInfo *asc.GameCenterAchievementImageResponse
+	var err error
 
-	imageInfo, _, err := client.GameCenter.GetGameCenterAchievementImage(ctx, imageID, nil)
+	// Get image info with retry
+	err = retryWithBackoff(ctx, fmt.Sprintf("GetImage[%s]", locale), func() error {
+		if err := rateLimiter.Wait(ctx); err != nil {
+			return err
+		}
+		imageInfo, _, err = client.GameCenter.GetGameCenterAchievementImage(ctx, imageID, nil)
+		return err
+	})
 
 	if !isImageUploadComplete(imageInfo, err) {
 		// Image upload incomplete or failed, delete and re-upload
@@ -422,22 +506,26 @@ func verifyAndHandleImage(ctx context.Context, client *asc.Client, imageID strin
 		}
 		mu.Unlock()
 
-		// Delete the incomplete image
-		if err := rateLimiter.Wait(ctx); err != nil {
-			return fmt.Errorf("rate limiter error for deleting image: %w", err)
-		}
-
-		_, deleteErr := client.GameCenter.DeleteGameCenterAchievementImage(ctx, imageID)
+		// Delete the incomplete image with retry
+		deleteErr := retryWithBackoff(ctx, fmt.Sprintf("DeleteImage[%s]", locale), func() error {
+			if err := rateLimiter.Wait(ctx); err != nil {
+				return err
+			}
+			_, err := client.GameCenter.DeleteGameCenterAchievementImage(ctx, imageID)
+			return err
+		})
 		if deleteErr != nil {
 			return fmt.Errorf("failed to delete incomplete image: %w", deleteErr)
 		}
 
-		// Re-upload the image
-		if err := rateLimiter.Wait(ctx); err != nil {
-			return fmt.Errorf("rate limiter error for re-uploading image: %w", err)
-		}
-
-		if imgErr := uploadImage(ctx, client, localizationID, imagePath); imgErr != nil {
+		// Re-upload the image with retry
+		imgErr := retryWithBackoff(ctx, fmt.Sprintf("ReuploadImage[%s]", locale), func() error {
+			if err := rateLimiter.Wait(ctx); err != nil {
+				return err
+			}
+			return uploadImage(ctx, client, localizationID, imagePath)
+		})
+		if imgErr != nil {
 			return fmt.Errorf("failed to re-upload image: %w", imgErr)
 		}
 
@@ -460,11 +548,14 @@ func uploadImageIfProvided(ctx context.Context, client *asc.Client, localization
 		return nil
 	}
 
-	if err := rateLimiter.Wait(ctx); err != nil {
-		return fmt.Errorf("rate limiter error for image: %w", err)
-	}
-
-	if imgErr := uploadImage(ctx, client, localizationID, imagePath); imgErr != nil {
+	// Upload image with retry
+	imgErr := retryWithBackoff(ctx, fmt.Sprintf("UploadImage[%s]", locale), func() error {
+		if err := rateLimiter.Wait(ctx); err != nil {
+			return err
+		}
+		return uploadImage(ctx, client, localizationID, imagePath)
+	})
+	if imgErr != nil {
 		return fmt.Errorf("failed to upload image: %w", imgErr)
 	}
 
@@ -477,16 +568,22 @@ func uploadImageIfProvided(ctx context.Context, client *asc.Client, localization
 
 // createNewLocalization creates a new localization and uploads its image if provided
 func createNewLocalization(ctx context.Context, client *asc.Client, achievementID string, locConfig LocalizationConfig, mu *sync.Mutex) error {
-	if err := rateLimiter.Wait(ctx); err != nil {
-		return fmt.Errorf("rate limiter error: %w", err)
-	}
+	var newLoc *asc.GameCenterAchievementLocalizationResponse
 
-	newLoc, _, locErr := client.GameCenter.CreateGameCenterAchievementLocalization(ctx, asc.GameCenterAchievementLocalizationCreateRequestAttributes{
-		Locale:                  locConfig.Locale,
-		Name:                    locConfig.Name,
-		BeforeEarnedDescription: locConfig.BeforeEarnedDescription,
-		AfterEarnedDescription:  locConfig.AfterEarnedDescription,
-	}, achievementID)
+	// Create localization with retry
+	locErr := retryWithBackoff(ctx, fmt.Sprintf("CreateLocalization[%s]", locConfig.Locale), func() error {
+		if err := rateLimiter.Wait(ctx); err != nil {
+			return err
+		}
+		var err error
+		newLoc, _, err = client.GameCenter.CreateGameCenterAchievementLocalization(ctx, asc.GameCenterAchievementLocalizationCreateRequestAttributes{
+			Locale:                  locConfig.Locale,
+			Name:                    locConfig.Name,
+			BeforeEarnedDescription: locConfig.BeforeEarnedDescription,
+			AfterEarnedDescription:  locConfig.AfterEarnedDescription,
+		}, achievementID)
+		return err
+	})
 	if locErr != nil {
 		return fmt.Errorf("failed to create localization: %w", locErr)
 	}
@@ -518,12 +615,14 @@ func handleExistingLocalization(ctx context.Context, client *asc.Client, existin
 				return err
 			}
 		} else {
-			// No image exists, upload new image
-			if err := rateLimiter.Wait(ctx); err != nil {
-				return fmt.Errorf("rate limiter error for image: %w", err)
-			}
-
-			if imgErr := uploadImage(ctx, client, existingLoc.ID, locConfig.ImageFile); imgErr != nil {
+			// No image exists, upload new image with retry
+			imgErr := retryWithBackoff(ctx, fmt.Sprintf("UploadMissingImage[%s]", locConfig.Locale), func() error {
+				if err := rateLimiter.Wait(ctx); err != nil {
+					return err
+				}
+				return uploadImage(ctx, client, existingLoc.ID, locConfig.ImageFile)
+			})
+			if imgErr != nil {
 				return fmt.Errorf("failed to upload image: %w", imgErr)
 			}
 
@@ -618,20 +717,29 @@ func createAchievementWithRelease(ctx context.Context, client *asc.Client, gameC
 		Repeatable:       config.Repeatable,
 	}
 
-	if gameCenterGroupID != "" {
-		// App belongs to a group, create achievement at group level
-		achievement, _, err = client.GameCenter.CreateGameCenterAchievementForGroup(ctx, attrs, gameCenterGroupID)
-	} else {
-		// App does not belong to a group, create achievement at app level
-		achievement, _, err = client.GameCenter.CreateGameCenterAchievement(ctx, attrs, gameCenterDetailID)
-	}
+	// Create achievement with retry
+	err = retryWithBackoff(ctx, fmt.Sprintf("CreateAchievement[%s]", config.VendorIdentifier), func() error {
+		if gameCenterGroupID != "" {
+			// App belongs to a group, create achievement at group level
+			achievement, _, err = client.GameCenter.CreateGameCenterAchievementForGroup(ctx, attrs, gameCenterGroupID)
+		} else {
+			// App does not belong to a group, create achievement at app level
+			achievement, _, err = client.GameCenter.CreateGameCenterAchievement(ctx, attrs, gameCenterDetailID)
+		}
+		return err
+	})
 	if err != nil {
 		return "", "", fmt.Errorf("failed to create achievement: %w", err)
 	}
 	fmt.Printf("  Achievement ID: %s\n", achievement.Data.ID)
 
 	// 2. Create release for the achievement (for ordering - may fail if no editable version)
-	release, _, releaseErr := client.GameCenter.CreateGameCenterAchievementRelease(ctx, achievement.Data.ID, gameCenterDetailID)
+	var release *asc.GameCenterAchievementReleaseResponse
+	releaseErr := retryWithBackoff(ctx, fmt.Sprintf("CreateRelease[%s]", config.VendorIdentifier), func() error {
+		var err error
+		release, _, err = client.GameCenter.CreateGameCenterAchievementRelease(ctx, achievement.Data.ID, gameCenterDetailID)
+		return err
+	})
 	if releaseErr != nil {
 		fmt.Printf("  Note: Could not create release: %v\n", releaseErr)
 		fmt.Println("  (Release creation requires an editable Game Center enabled app version)")
@@ -652,17 +760,22 @@ func createAchievementWithRelease(ctx context.Context, client *asc.Client, gameC
 	for _, locConfig := range config.Localizations {
 		locConfig := locConfig // capture loop variable
 		g.Go(func() error {
-			// Rate limit to avoid API throttling
-			if err := rateLimiter.Wait(gCtx); err != nil {
-				return fmt.Errorf("rate limiter error for %s: %w", locConfig.Locale, err)
-			}
+			var localization *asc.GameCenterAchievementLocalizationResponse
 
-			localization, _, locErr := client.GameCenter.CreateGameCenterAchievementLocalization(gCtx, asc.GameCenterAchievementLocalizationCreateRequestAttributes{
-				Locale:                  locConfig.Locale,
-				Name:                    locConfig.Name,
-				BeforeEarnedDescription: locConfig.BeforeEarnedDescription,
-				AfterEarnedDescription:  locConfig.AfterEarnedDescription,
-			}, achievement.Data.ID)
+			// Create localization with retry
+			locErr := retryWithBackoff(gCtx, fmt.Sprintf("CreateLoc[%s]", locConfig.Locale), func() error {
+				if err := rateLimiter.Wait(gCtx); err != nil {
+					return err
+				}
+				var err error
+				localization, _, err = client.GameCenter.CreateGameCenterAchievementLocalization(gCtx, asc.GameCenterAchievementLocalizationCreateRequestAttributes{
+					Locale:                  locConfig.Locale,
+					Name:                    locConfig.Name,
+					BeforeEarnedDescription: locConfig.BeforeEarnedDescription,
+					AfterEarnedDescription:  locConfig.AfterEarnedDescription,
+				}, achievement.Data.ID)
+				return err
+			})
 			if locErr != nil {
 				return fmt.Errorf("failed to create localization for %s: %w", locConfig.Locale, locErr)
 			}
@@ -673,12 +786,13 @@ func createAchievementWithRelease(ctx context.Context, client *asc.Client, gameC
 
 			// Upload image if provided
 			if locConfig.ImageFile != "" {
-				// Rate limit for image upload API calls
-				if err := rateLimiter.Wait(gCtx); err != nil {
-					return fmt.Errorf("rate limiter error for image %s: %w", locConfig.Locale, err)
-				}
-
-				if imgErr := uploadImage(gCtx, client, localization.Data.ID, locConfig.ImageFile); imgErr != nil {
+				imgErr := retryWithBackoff(gCtx, fmt.Sprintf("UploadImg[%s]", locConfig.Locale), func() error {
+					if err := rateLimiter.Wait(gCtx); err != nil {
+						return err
+					}
+					return uploadImage(gCtx, client, localization.Data.ID, locConfig.ImageFile)
+				})
+				if imgErr != nil {
 					return fmt.Errorf("failed to upload image for %s: %w", locConfig.Locale, imgErr)
 				}
 
