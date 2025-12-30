@@ -31,6 +31,7 @@ import (
 	"io"
 	"log"
 	"math/rand"
+	"net/http"
 	"os"
 	"strings"
 	"sync"
@@ -50,9 +51,25 @@ var (
 )
 
 // rateLimiter limits API requests based on App Store Connect API official limits:
-// - Documented: 3600 requests/hour
-// - Undocumented: ~300-350 requests/minute (discovered by community)
-// Setting to 4.5 req/s = 270 req/min to stay safely under the 300/min limit
+//
+// Official Documentation:
+// https://developer.apple.com/documentation/appstoreconnectapi/identifying-rate-limits
+//
+// Rate Limits:
+// 1. Documented (per hour): 3600 requests/hour
+//   - Returned in response header: x-rate-limit: "user-hour-lim:3600;user-hour-rem:3121;"
+//   - user-hour-lim: Maximum requests allowed per hour
+//   - user-hour-rem: Remaining requests in current hour
+//
+// 2. Undocumented (per minute): ~300-350 requests/minute
+//   - Discovered by community testing (https://developer.apple.com/forums/thread/731014)
+//   - After 300-350 requests in a clock minute, 429 errors start appearing
+//   - Limit resets at the start of each clock minute
+//
+// Current Configuration:
+// - Rate: 4.5 req/s = 270 req/min (safely under 300/min limit)
+// - Burst: 10 requests
+// - This ensures we stay under both hourly and per-minute limits
 var rateLimiter = rate.NewLimiter(rate.Limit(4.5), 10)
 
 // Retry configuration for handling rate limit errors
@@ -61,6 +78,176 @@ const (
 	initialBackoff = 5 * time.Second
 	maxBackoff     = 60 * time.Second
 )
+
+// rateLimitInfo tracks rate limit information from API responses
+type rateLimitInfo struct {
+	hourLimit     int       // Maximum requests per hour
+	hourRemaining int       // Remaining requests in current hour
+	lastUpdated   time.Time // When this info was last updated
+	mu            sync.RWMutex
+}
+
+var globalRateLimitInfo = &rateLimitInfo{}
+
+// progressTracker tracks overall progress
+type progressTracker struct {
+	totalAchievements int
+	processed         int
+	startTime         time.Time
+	mu                sync.Mutex
+}
+
+var globalProgress = &progressTracker{}
+
+// initProgress initializes the progress tracker
+func initProgress(total int) {
+	globalProgress.mu.Lock()
+	defer globalProgress.mu.Unlock()
+	globalProgress.totalAchievements = total
+	globalProgress.processed = 0
+	globalProgress.startTime = time.Now()
+}
+
+// updateProgress updates progress and prints status
+func updateProgress(achievementName string) {
+	globalProgress.mu.Lock()
+	globalProgress.processed++
+	processed := globalProgress.processed
+	total := globalProgress.totalAchievements
+	elapsed := time.Since(globalProgress.startTime)
+	globalProgress.mu.Unlock()
+
+	// Calculate progress percentage
+	progress := float64(processed) / float64(total) * 100
+
+	// Calculate estimated time remaining
+	var eta time.Duration
+	if processed > 0 {
+		avgTimePerAchievement := elapsed / time.Duration(processed)
+		remaining := total - processed
+		eta = avgTimePerAchievement * time.Duration(remaining)
+	}
+
+	// Print progress
+	fmt.Printf("\n[PROGRESS] %d/%d (%.1f%%) | Elapsed: %v | ETA: %v | Current: %s\n",
+		processed, total, progress, elapsed.Round(time.Second), eta.Round(time.Second), achievementName)
+
+	// Adjust rate limit dynamically every 5 achievements
+	if processed%5 == 0 {
+		adjustRateLimitDynamically()
+	}
+}
+
+// parseRateLimitHeader parses the x-rate-limit header from API responses
+// Format: "user-hour-lim:3600;user-hour-rem:3121;"
+func parseRateLimitHeader(header string) (hourLimit, hourRemaining int) {
+	if header == "" {
+		return 0, 0
+	}
+
+	// Parse format: "user-hour-lim:3600;user-hour-rem:3121;"
+	parts := strings.Split(header, ";")
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+
+		kv := strings.Split(part, ":")
+		if len(kv) != 2 {
+			continue
+		}
+
+		key := strings.TrimSpace(kv[0])
+		value := strings.TrimSpace(kv[1])
+
+		var val int
+		if _, err := fmt.Sscanf(value, "%d", &val); err != nil {
+			continue
+		}
+
+		switch key {
+		case "user-hour-lim":
+			hourLimit = val
+		case "user-hour-rem":
+			hourRemaining = val
+		}
+	}
+
+	return hourLimit, hourRemaining
+}
+
+// updateRateLimitInfo updates the global rate limit info from response
+func updateRateLimitInfo(resp *http.Response) {
+	if resp == nil {
+		return
+	}
+
+	header := resp.Header.Get("x-rate-limit")
+	if header == "" {
+		return
+	}
+
+	hourLimit, hourRemaining := parseRateLimitHeader(header)
+	if hourLimit == 0 {
+		return
+	}
+
+	globalRateLimitInfo.mu.Lock()
+	globalRateLimitInfo.hourLimit = hourLimit
+	globalRateLimitInfo.hourRemaining = hourRemaining
+	globalRateLimitInfo.lastUpdated = time.Now()
+	globalRateLimitInfo.mu.Unlock()
+
+	// Log warning if remaining requests are getting low
+	if hourRemaining < 500 {
+		log.Printf("[RATE LIMIT WARNING] Only %d/%d requests remaining this hour", hourRemaining, hourLimit)
+	}
+}
+
+// getRateLimitInfo returns current rate limit information
+func getRateLimitInfo() (hourLimit, hourRemaining int, lastUpdated time.Time) {
+	globalRateLimitInfo.mu.RLock()
+	defer globalRateLimitInfo.mu.RUnlock()
+	return globalRateLimitInfo.hourLimit, globalRateLimitInfo.hourRemaining, globalRateLimitInfo.lastUpdated
+}
+
+// adjustRateLimitDynamically adjusts the rate limiter based on remaining quota
+func adjustRateLimitDynamically() {
+	hourLimit, hourRemaining, lastUpdated := getRateLimitInfo()
+	if hourLimit == 0 || time.Since(lastUpdated) > 5*time.Minute {
+		return // No data or stale data
+	}
+
+	// Calculate remaining percentage
+	remainingPercent := float64(hourRemaining) / float64(hourLimit) * 100
+
+	var newRate float64
+	switch {
+	case remainingPercent < 10:
+		// Critical: slow down to 2 req/s (120 req/min)
+		newRate = 2.0
+		log.Printf("[RATE ADJUST] Critical quota (%.1f%% remaining), reducing to 2 req/s", remainingPercent)
+	case remainingPercent < 25:
+		// Low: slow down to 3 req/s (180 req/min)
+		newRate = 3.0
+		log.Printf("[RATE ADJUST] Low quota (%.1f%% remaining), reducing to 3 req/s", remainingPercent)
+	case remainingPercent < 50:
+		// Medium: use default 4.5 req/s (270 req/min)
+		newRate = 4.5
+	case remainingPercent >= 50:
+		// Plenty: can use 5 req/s (300 req/min) - still under the 300-350/min limit
+		newRate = 5.0
+		if remainingPercent > 80 {
+			log.Printf("[RATE ADJUST] Plenty of quota (%.1f%% remaining), increasing to 5 req/s", remainingPercent)
+		}
+	default:
+		newRate = 4.5
+	}
+
+	// Update rate limiter
+	rateLimiter.SetLimit(rate.Limit(newRate))
+}
 
 // AchievementConfig represents a single achievement configuration
 type AchievementConfig struct {
@@ -138,6 +325,9 @@ func main() {
 		}
 	}
 
+	// Initialize progress tracker
+	initProgress(len(config.Achievements))
+
 	// Create each achievement and collect new release IDs
 	var createdAchievements []string
 	var skippedAchievements []string
@@ -190,6 +380,16 @@ func main() {
 			})
 		}
 		fmt.Printf("Achievement created successfully: %s\n\n", achievementID)
+
+		// Update progress
+		updateProgress(achConfig.ReferenceName)
+
+		// Add delay between achievements to smooth out request distribution
+		if i < len(config.Achievements)-1 {
+			delayDuration := 2 * time.Second
+			fmt.Printf("[DELAY] Waiting %v before next achievement...\n", delayDuration)
+			time.Sleep(delayDuration)
+		}
 	}
 
 	// Reorder achievements based on position field
@@ -288,12 +488,29 @@ type gameCenterInfo struct {
 // initializeGameCenter initializes Game Center and returns relevant IDs
 func initializeGameCenter(ctx context.Context, client *asc.Client, app *asc.App) (*gameCenterInfo, error) {
 	fmt.Println("Getting Game Center detail...")
-	gameCenterDetail, _, err := client.GameCenter.GetGameCenterDetailForApp(ctx, app.ID, &asc.GetGameCenterDetailForAppQuery{
-		Include: []string{"gameCenterGroup"},
+	var gameCenterDetail *asc.GameCenterDetailResponse
+	err := retryWithBackoff(ctx, "GetGameCenterDetail", func() error {
+		var resp *asc.Response
+		var err error
+		gameCenterDetail, resp, err = client.GameCenter.GetGameCenterDetailForApp(ctx, app.ID, &asc.GetGameCenterDetailForAppQuery{
+			Include: []string{"gameCenterGroup"},
+		})
+		if resp != nil && resp.Response != nil {
+			updateRateLimitInfo(resp.Response)
+		}
+		return err
 	})
 	if err != nil {
 		fmt.Println("Game Center not enabled, enabling...")
-		gameCenterDetail, _, err = client.GameCenter.CreateGameCenterDetail(ctx, app.ID)
+		err = retryWithBackoff(ctx, "CreateGameCenterDetail", func() error {
+			var resp *asc.Response
+			var err error
+			gameCenterDetail, resp, err = client.GameCenter.CreateGameCenterDetail(ctx, app.ID)
+			if resp != nil && resp.Response != nil {
+				updateRateLimitInfo(resp.Response)
+			}
+			return err
+		})
 		if err != nil {
 			return nil, fmt.Errorf("failed to enable Game Center: %w", err)
 		}
@@ -302,7 +519,16 @@ func initializeGameCenter(ctx context.Context, client *asc.Client, app *asc.App)
 
 	// Check if the app belongs to a Game Center Group
 	var gameCenterGroupID string
-	gameCenterGroup, _, err := client.GameCenter.GetGameCenterGroupForDetail(ctx, gameCenterDetail.Data.ID, nil)
+	var gameCenterGroup *asc.GameCenterGroupResponse
+	err = retryWithBackoff(ctx, "GetGameCenterGroup", func() error {
+		var resp *asc.Response
+		var err error
+		gameCenterGroup, resp, err = client.GameCenter.GetGameCenterGroupForDetail(ctx, gameCenterDetail.Data.ID, nil)
+		if resp != nil && resp.Response != nil {
+			updateRateLimitInfo(resp.Response)
+		}
+		return err
+	})
 	if err == nil && gameCenterGroup != nil && gameCenterGroup.Data.ID != "" {
 		gameCenterGroupID = gameCenterGroup.Data.ID
 		fmt.Printf("App belongs to Game Center Group: %s\n", gameCenterGroupID)
@@ -328,8 +554,17 @@ func initializeGameCenter(ctx context.Context, client *asc.Client, app *asc.App)
 	// Get existing achievement releases for ordering
 	fmt.Println("Getting existing achievement releases...")
 	var existingReleaseIDs []string
-	existingReleases, _, err := client.GameCenter.ListGameCenterAchievementReleasesForDetail(ctx, gameCenterDetail.Data.ID, &asc.ListGameCenterAchievementReleasesQuery{
-		Limit: 200,
+	var existingReleases *asc.GameCenterAchievementReleasesResponse
+	err = retryWithBackoff(ctx, "ListAchievementReleases", func() error {
+		var resp *asc.Response
+		var err error
+		existingReleases, resp, err = client.GameCenter.ListGameCenterAchievementReleasesForDetail(ctx, gameCenterDetail.Data.ID, &asc.ListGameCenterAchievementReleasesQuery{
+			Limit: 200,
+		})
+		if resp != nil && resp.Response != nil {
+			updateRateLimitInfo(resp.Response)
+		}
+		return err
 	})
 	if err != nil {
 		fmt.Printf("Note: Could not get existing releases (this is normal if no releases exist yet): %v\n", err)
@@ -351,8 +586,18 @@ func initializeGameCenter(ctx context.Context, client *asc.Client, app *asc.App)
 func fetchExistingAchievements(ctx context.Context, client *asc.Client, gameCenterDetailID string) (map[string]*asc.GameCenterAchievement, error) {
 	existingAchievements := make(map[string]*asc.GameCenterAchievement)
 	fmt.Println("Resume mode enabled, fetching existing achievements...")
-	existingAchList, _, err := client.GameCenter.ListGameCenterAchievementsForDetail(ctx, gameCenterDetailID, &asc.ListGameCenterAchievementsQuery{
-		Limit: 200,
+
+	var existingAchList *asc.GameCenterAchievementsResponse
+	err := retryWithBackoff(ctx, "ListExistingAchievements", func() error {
+		var resp *asc.Response
+		var err error
+		existingAchList, resp, err = client.GameCenter.ListGameCenterAchievementsForDetail(ctx, gameCenterDetailID, &asc.ListGameCenterAchievementsQuery{
+			Limit: 200,
+		})
+		if resp != nil && resp.Response != nil {
+			updateRateLimitInfo(resp.Response)
+		}
+		return err
 	})
 	if err != nil {
 		fmt.Printf("Warning: Could not fetch existing achievements: %v\n", err)
@@ -461,6 +706,16 @@ func printSummary(totalCount, createdCount, skippedCount, releasesCount int, fai
 			}
 		}
 	}
+
+	// Display rate limit information if available
+	hourLimit, hourRemaining, lastUpdated := getRateLimitInfo()
+	if hourLimit > 0 {
+		fmt.Printf("\nRate Limit Status (as of %s):\n", lastUpdated.Format("15:04:05"))
+		fmt.Printf("  Hourly limit: %d requests\n", hourLimit)
+		fmt.Printf("  Remaining: %d requests\n", hourRemaining)
+		fmt.Printf("  Used: %d requests (%.1f%%)\n", hourLimit-hourRemaining, float64(hourLimit-hourRemaining)/float64(hourLimit)*100)
+	}
+
 	fmt.Println("========================================")
 }
 
@@ -490,7 +745,11 @@ func verifyAndHandleImage(ctx context.Context, client *asc.Client, imageID strin
 		if err := rateLimiter.Wait(ctx); err != nil {
 			return err
 		}
-		imageInfo, _, err = client.GameCenter.GetGameCenterAchievementImage(ctx, imageID, nil)
+		var resp *asc.Response
+		imageInfo, resp, err = client.GameCenter.GetGameCenterAchievementImage(ctx, imageID, nil)
+		if resp != nil && resp.Response != nil {
+			updateRateLimitInfo(resp.Response)
+		}
 		return err
 	})
 
@@ -511,7 +770,10 @@ func verifyAndHandleImage(ctx context.Context, client *asc.Client, imageID strin
 			if err := rateLimiter.Wait(ctx); err != nil {
 				return err
 			}
-			_, err := client.GameCenter.DeleteGameCenterAchievementImage(ctx, imageID)
+			resp, err := client.GameCenter.DeleteGameCenterAchievementImage(ctx, imageID)
+			if resp != nil && resp.Response != nil {
+				updateRateLimitInfo(resp.Response)
+			}
 			return err
 		})
 		if deleteErr != nil {
@@ -576,12 +838,16 @@ func createNewLocalization(ctx context.Context, client *asc.Client, achievementI
 			return err
 		}
 		var err error
-		newLoc, _, err = client.GameCenter.CreateGameCenterAchievementLocalization(ctx, asc.GameCenterAchievementLocalizationCreateRequestAttributes{
+		var resp *asc.Response
+		newLoc, resp, err = client.GameCenter.CreateGameCenterAchievementLocalization(ctx, asc.GameCenterAchievementLocalizationCreateRequestAttributes{
 			Locale:                  locConfig.Locale,
 			Name:                    locConfig.Name,
 			BeforeEarnedDescription: locConfig.BeforeEarnedDescription,
 			AfterEarnedDescription:  locConfig.AfterEarnedDescription,
 		}, achievementID)
+		if resp != nil && resp.Response != nil {
+			updateRateLimitInfo(resp.Response)
+		}
 		return err
 	})
 	if locErr != nil {
@@ -643,10 +909,19 @@ func handleExistingLocalization(ctx context.Context, client *asc.Client, existin
 // It checks which localizations exist and which need images, then only uploads missing images
 // Returns a slice of failed localizations
 func processLocalizationsForExistingAchievement(ctx context.Context, client *asc.Client, achievementID string, localizations []LocalizationConfig) []localizationError {
-	// Get existing localizations for this achievement
-	existingLocs, _, err := client.GameCenter.ListGameCenterAchievementLocalizationsForAchievement(ctx, achievementID, &asc.ListGameCenterAchievementLocalizationsQuery{
-		Limit:   200,
-		Include: []string{"gameCenterAchievementImage"},
+	// Get existing localizations for this achievement with retry
+	var existingLocs *asc.GameCenterAchievementLocalizationsResponse
+	err := retryWithBackoff(ctx, "ListLocalizations", func() error {
+		var resp *asc.Response
+		var err error
+		existingLocs, resp, err = client.GameCenter.ListGameCenterAchievementLocalizationsForAchievement(ctx, achievementID, &asc.ListGameCenterAchievementLocalizationsQuery{
+			Limit:   200,
+			Include: []string{"gameCenterAchievementImage"},
+		})
+		if resp != nil && resp.Response != nil {
+			updateRateLimitInfo(resp.Response)
+		}
+		return err
 	})
 	if err != nil {
 		return []localizationError{{locale: "unknown", err: fmt.Errorf("failed to list existing localizations: %w", err)}}
@@ -719,12 +994,16 @@ func createAchievementWithRelease(ctx context.Context, client *asc.Client, gameC
 
 	// Create achievement with retry
 	err = retryWithBackoff(ctx, fmt.Sprintf("CreateAchievement[%s]", config.VendorIdentifier), func() error {
+		var resp *asc.Response
 		if gameCenterGroupID != "" {
 			// App belongs to a group, create achievement at group level
-			achievement, _, err = client.GameCenter.CreateGameCenterAchievementForGroup(ctx, attrs, gameCenterGroupID)
+			achievement, resp, err = client.GameCenter.CreateGameCenterAchievementForGroup(ctx, attrs, gameCenterGroupID)
 		} else {
 			// App does not belong to a group, create achievement at app level
-			achievement, _, err = client.GameCenter.CreateGameCenterAchievement(ctx, attrs, gameCenterDetailID)
+			achievement, resp, err = client.GameCenter.CreateGameCenterAchievement(ctx, attrs, gameCenterDetailID)
+		}
+		if resp != nil && resp.Response != nil {
+			updateRateLimitInfo(resp.Response)
 		}
 		return err
 	})
@@ -768,12 +1047,16 @@ func createAchievementWithRelease(ctx context.Context, client *asc.Client, gameC
 					return err
 				}
 				var err error
-				localization, _, err = client.GameCenter.CreateGameCenterAchievementLocalization(gCtx, asc.GameCenterAchievementLocalizationCreateRequestAttributes{
+				var resp *asc.Response
+				localization, resp, err = client.GameCenter.CreateGameCenterAchievementLocalization(gCtx, asc.GameCenterAchievementLocalizationCreateRequestAttributes{
 					Locale:                  locConfig.Locale,
 					Name:                    locConfig.Name,
 					BeforeEarnedDescription: locConfig.BeforeEarnedDescription,
 					AfterEarnedDescription:  locConfig.AfterEarnedDescription,
 				}, achievement.Data.ID)
+				if resp != nil && resp.Response != nil {
+					updateRateLimitInfo(resp.Response)
+				}
 				return err
 			})
 			if locErr != nil {
@@ -831,11 +1114,15 @@ func uploadImage(ctx context.Context, client *asc.Client, localizationID string,
 
 	fmt.Printf("      File: %s, Size: %d bytes\n", stat.Name(), stat.Size())
 
-	// Reserve
-	imageReservation, _, err := client.GameCenter.CreateGameCenterAchievementImage(ctx, asc.GameCenterAchievementImageCreateRequestAttributes{
+	// Reserve with response header monitoring
+	var imageReservation *asc.GameCenterAchievementImageResponse
+	imageReservation, resp, err := client.GameCenter.CreateGameCenterAchievementImage(ctx, asc.GameCenterAchievementImageCreateRequestAttributes{
 		FileName: stat.Name(),
 		FileSize: int(stat.Size()),
 	}, localizationID)
+	if resp != nil && resp.Response != nil {
+		updateRateLimitInfo(resp.Response)
+	}
 	if err != nil {
 		return fmt.Errorf("failed to reserve image: %w", err)
 	}
@@ -861,10 +1148,13 @@ func uploadImage(ctx context.Context, client *asc.Client, localizationID string,
 		return fmt.Errorf("failed to upload: %w", err)
 	}
 
-	// Commit
-	_, _, err = client.GameCenter.UpdateGameCenterAchievementImage(ctx, imageReservation.Data.ID, &asc.GameCenterAchievementImageUpdateRequestAttributes{
+	// Commit with response header monitoring
+	_, commitResp, err := client.GameCenter.UpdateGameCenterAchievementImage(ctx, imageReservation.Data.ID, &asc.GameCenterAchievementImageUpdateRequestAttributes{
 		Uploaded: asc.Bool(true),
 	})
+	if commitResp != nil && commitResp.Response != nil {
+		updateRateLimitInfo(commitResp.Response)
+	}
 	if err != nil {
 		return fmt.Errorf("failed to commit: %w", err)
 	}
