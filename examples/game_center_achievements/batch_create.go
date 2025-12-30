@@ -500,8 +500,18 @@ func initializeGameCenter(ctx context.Context, client *asc.Client, app *asc.App)
 		}
 		return err
 	})
-	if err != nil {
-		fmt.Println("Game Center not enabled, enabling...")
+
+	// Check if we need to create Game Center Detail
+	// This happens if: 1) API returned error, OR 2) API returned empty ID
+	needsCreation := err != nil || gameCenterDetail == nil || gameCenterDetail.Data.ID == ""
+
+	if needsCreation {
+		if err != nil {
+			fmt.Printf("Game Center not found (error: %v), creating...\n", err)
+		} else {
+			fmt.Println("Game Center Detail ID is empty, creating...")
+		}
+
 		err = retryWithBackoff(ctx, "CreateGameCenterDetail", func() error {
 			var resp *asc.Response
 			var err error
@@ -512,24 +522,13 @@ func initializeGameCenter(ctx context.Context, client *asc.Client, app *asc.App)
 			return err
 		})
 		if err != nil {
-			return nil, fmt.Errorf("failed to enable Game Center: %w", err)
+			return nil, fmt.Errorf("failed to create Game Center Detail: %w", err)
 		}
 	}
 
-	// Defensive check: ensure we have a valid Game Center Detail ID
-	if gameCenterDetail == nil {
-		return nil, fmt.Errorf("gameCenterDetail is nil after API call")
-	}
-	if gameCenterDetail.Data.ID == "" {
-		// Print detailed debug information
-		fmt.Printf("DEBUG: gameCenterDetail structure: %+v\n", gameCenterDetail)
-		if gameCenterDetail.Data.Attributes != nil {
-			fmt.Printf("DEBUG: gameCenterDetail.Data.Attributes: %+v\n", gameCenterDetail.Data.Attributes)
-		}
-		if gameCenterDetail.Data.Relationships != nil {
-			fmt.Printf("DEBUG: gameCenterDetail.Data.Relationships: %+v\n", gameCenterDetail.Data.Relationships)
-		}
-		return nil, fmt.Errorf("gameCenterDetail.Data.ID is empty - this should not happen. Please check the API response above")
+	// Final check: ensure we have a valid Game Center Detail ID
+	if gameCenterDetail == nil || gameCenterDetail.Data.ID == "" {
+		return nil, fmt.Errorf("failed to get valid Game Center Detail ID after creation attempt")
 	}
 
 	fmt.Printf("Game Center Detail ID: %s\n\n", gameCenterDetail.Data.ID)
