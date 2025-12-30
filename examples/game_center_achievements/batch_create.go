@@ -515,6 +515,23 @@ func initializeGameCenter(ctx context.Context, client *asc.Client, app *asc.App)
 			return nil, fmt.Errorf("failed to enable Game Center: %w", err)
 		}
 	}
+
+	// Defensive check: ensure we have a valid Game Center Detail ID
+	if gameCenterDetail == nil {
+		return nil, fmt.Errorf("gameCenterDetail is nil after API call")
+	}
+	if gameCenterDetail.Data.ID == "" {
+		// Print detailed debug information
+		fmt.Printf("DEBUG: gameCenterDetail structure: %+v\n", gameCenterDetail)
+		if gameCenterDetail.Data.Attributes != nil {
+			fmt.Printf("DEBUG: gameCenterDetail.Data.Attributes: %+v\n", gameCenterDetail.Data.Attributes)
+		}
+		if gameCenterDetail.Data.Relationships != nil {
+			fmt.Printf("DEBUG: gameCenterDetail.Data.Relationships: %+v\n", gameCenterDetail.Data.Relationships)
+		}
+		return nil, fmt.Errorf("gameCenterDetail.Data.ID is empty - this should not happen. Please check the API response above")
+	}
+
 	fmt.Printf("Game Center Detail ID: %s\n\n", gameCenterDetail.Data.ID)
 
 	// Check if the app belongs to a Game Center Group
