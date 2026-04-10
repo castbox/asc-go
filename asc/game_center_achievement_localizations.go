@@ -121,6 +121,20 @@ type GameCenterAchievementLocalizationsResponse struct {
 // in a GameCenterAchievementLocalizationResponse or GameCenterAchievementLocalizationsResponse.
 type GameCenterAchievementLocalizationResponseIncluded included
 
+// UnmarshalJSON is a custom unmarshaller for the heterogenous data stored in GameCenterAchievementLocalizationResponseIncluded.
+func (i *GameCenterAchievementLocalizationResponseIncluded) UnmarshalJSON(b []byte) error {
+	typeName, inner, err := unmarshalInclude(b)
+	i.Type = typeName
+	i.inner = inner
+
+	return err
+}
+
+// GameCenterAchievementImage returns the GameCenterAchievementImage stored within, if one is present.
+func (i *GameCenterAchievementLocalizationResponseIncluded) GameCenterAchievementImage() *GameCenterAchievementImage {
+	return extractIncludedGameCenterAchievementImage(i.inner)
+}
+
 // ListGameCenterAchievementLocalizationsQuery defines model for ListGameCenterAchievementLocalizations
 //
 // https://developer.apple.com/documentation/appstoreconnectapi/list_all_localizations_for_an_achievement

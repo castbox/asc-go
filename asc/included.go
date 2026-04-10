@@ -289,6 +289,14 @@ func extractIncludedEndUserLicenseAgreement(i interface{}) *EndUserLicenseAgreem
 	return nil
 }
 
+func extractIncludedGameCenterAchievementImage(i interface{}) *GameCenterAchievementImage {
+	if v, ok := i.(GameCenterAchievementImage); ok {
+		return &v
+	}
+
+	return nil
+}
+
 func extractIncludedGameCenterEnabledVersion(i interface{}) *GameCenterEnabledVersion {
 	if v, ok := i.(GameCenterEnabledVersion); ok {
 		return &v
@@ -554,6 +562,12 @@ func supportedIncludeTypes() func(string, []byte) (string, interface{}, error) {
 		},
 		"endUserLicenseAgreements": func(b []byte) (string, interface{}, error) {
 			var v EndUserLicenseAgreement
+			err := json.Unmarshal(b, &v)
+
+			return v.Type, v, err
+		},
+		"gameCenterAchievementImages": func(b []byte) (string, interface{}, error) {
+			var v GameCenterAchievementImage
 			err := json.Unmarshal(b, &v)
 
 			return v.Type, v, err
