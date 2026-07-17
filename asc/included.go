@@ -297,6 +297,38 @@ func extractIncludedGameCenterAchievementImage(i interface{}) *GameCenterAchieve
 	return nil
 }
 
+func extractIncludedGameCenterLeaderboard(i interface{}) *GameCenterLeaderboard {
+	if v, ok := i.(GameCenterLeaderboard); ok {
+		return &v
+	}
+
+	return nil
+}
+
+func extractIncludedGameCenterLeaderboardImage(i interface{}) *GameCenterLeaderboardImage {
+	if v, ok := i.(GameCenterLeaderboardImage); ok {
+		return &v
+	}
+
+	return nil
+}
+
+func extractIncludedGameCenterLeaderboardLocalization(i interface{}) *GameCenterLeaderboardLocalization {
+	if v, ok := i.(GameCenterLeaderboardLocalization); ok {
+		return &v
+	}
+
+	return nil
+}
+
+func extractIncludedGameCenterLeaderboardVersion(i interface{}) *GameCenterLeaderboardVersion {
+	if v, ok := i.(GameCenterLeaderboardVersion); ok {
+		return &v
+	}
+
+	return nil
+}
+
 func extractIncludedGameCenterEnabledVersion(i interface{}) *GameCenterEnabledVersion {
 	if v, ok := i.(GameCenterEnabledVersion); ok {
 		return &v
@@ -568,6 +600,30 @@ func supportedIncludeTypes() func(string, []byte) (string, interface{}, error) {
 		},
 		"gameCenterAchievementImages": func(b []byte) (string, interface{}, error) {
 			var v GameCenterAchievementImage
+			err := json.Unmarshal(b, &v)
+
+			return v.Type, v, err
+		},
+		"gameCenterLeaderboards": func(b []byte) (string, interface{}, error) {
+			var v GameCenterLeaderboard
+			err := json.Unmarshal(b, &v)
+
+			return v.Type, v, err
+		},
+		"gameCenterLeaderboardImages": func(b []byte) (string, interface{}, error) {
+			var v GameCenterLeaderboardImage
+			err := json.Unmarshal(b, &v)
+
+			return v.Type, v, err
+		},
+		"gameCenterLeaderboardLocalizations": func(b []byte) (string, interface{}, error) {
+			var v GameCenterLeaderboardLocalization
+			err := json.Unmarshal(b, &v)
+
+			return v.Type, v, err
+		},
+		"gameCenterLeaderboardVersions": func(b []byte) (string, interface{}, error) {
+			var v GameCenterLeaderboardVersion
 			err := json.Unmarshal(b, &v)
 
 			return v.Type, v, err

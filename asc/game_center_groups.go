@@ -47,10 +47,12 @@ type GameCenterGroupAttributes struct {
 //
 // https://developer.apple.com/documentation/appstoreconnectapi/gamecentergroup/relationships
 type GameCenterGroupRelationships struct {
-	GameCenterAchievements    *PagedRelationship `json:"gameCenterAchievements,omitempty"`
-	GameCenterDetails         *PagedRelationship `json:"gameCenterDetails,omitempty"`
-	GameCenterLeaderboardSets *PagedRelationship `json:"gameCenterLeaderboardSets,omitempty"`
-	GameCenterLeaderboards    *PagedRelationship `json:"gameCenterLeaderboards,omitempty"`
+	GameCenterAchievements      *PagedRelationship `json:"gameCenterAchievements,omitempty"`
+	GameCenterDetails           *PagedRelationship `json:"gameCenterDetails,omitempty"`
+	GameCenterLeaderboardSets   *PagedRelationship `json:"gameCenterLeaderboardSets,omitempty"`
+	GameCenterLeaderboardSetsV2 *PagedRelationship `json:"gameCenterLeaderboardSetsV2,omitempty"`
+	GameCenterLeaderboards      *PagedRelationship `json:"gameCenterLeaderboards,omitempty"`
+	GameCenterLeaderboardsV2    *PagedRelationship `json:"gameCenterLeaderboardsV2,omitempty"`
 }
 
 // gameCenterGroupCreateRequest defines model for GameCenterGroupCreateRequest.
@@ -97,6 +99,20 @@ type GameCenterGroupResponse struct {
 // in a GameCenterGroupResponse.
 type GameCenterGroupResponseIncluded included
 
+// UnmarshalJSON is a custom unmarshaller for the heterogenous data stored in GameCenterGroupResponseIncluded.
+func (i *GameCenterGroupResponseIncluded) UnmarshalJSON(b []byte) error {
+	typeName, inner, err := unmarshalInclude(b)
+	i.Type = typeName
+	i.inner = inner
+
+	return err
+}
+
+// GameCenterLeaderboard returns the GameCenterLeaderboard stored within, if one is present.
+func (i *GameCenterGroupResponseIncluded) GameCenterLeaderboard() *GameCenterLeaderboard {
+	return extractIncludedGameCenterLeaderboard(i.inner)
+}
+
 // GameCenterGroupsResponse defines model for GameCenterGroupsResponse.
 //
 // https://developer.apple.com/documentation/appstoreconnectapi/gamecentergroupsresponse
@@ -111,35 +127,39 @@ type GameCenterGroupsResponse struct {
 //
 // https://developer.apple.com/documentation/appstoreconnectapi/list_game_center_groups
 type ListGameCenterGroupsQuery struct {
-	FieldsGameCenterAchievements    []string `url:"fields[gameCenterAchievements],omitempty"`
-	FieldsGameCenterDetails         []string `url:"fields[gameCenterDetails],omitempty"`
-	FieldsGameCenterGroups          []string `url:"fields[gameCenterGroups],omitempty"`
-	FieldsGameCenterLeaderboardSets []string `url:"fields[gameCenterLeaderboardSets],omitempty"`
-	FieldsGameCenterLeaderboards    []string `url:"fields[gameCenterLeaderboards],omitempty"`
-	FilterGameCenterDetails         []string `url:"filter[gameCenterDetails],omitempty"`
-	Include                         []string `url:"include,omitempty"`
-	Limit                           int      `url:"limit,omitempty"`
-	LimitGameCenterAchievements     int      `url:"limit[gameCenterAchievements],omitempty"`
-	LimitGameCenterDetails          int      `url:"limit[gameCenterDetails],omitempty"`
-	LimitGameCenterLeaderboardSets  int      `url:"limit[gameCenterLeaderboardSets],omitempty"`
-	LimitGameCenterLeaderboards     int      `url:"limit[gameCenterLeaderboards],omitempty"`
-	Cursor                          string   `url:"cursor,omitempty"`
+	FieldsGameCenterAchievements     []string `url:"fields[gameCenterAchievements],omitempty"`
+	FieldsGameCenterDetails          []string `url:"fields[gameCenterDetails],omitempty"`
+	FieldsGameCenterGroups           []string `url:"fields[gameCenterGroups],omitempty"`
+	FieldsGameCenterLeaderboardSets  []string `url:"fields[gameCenterLeaderboardSets],omitempty"`
+	FieldsGameCenterLeaderboards     []string `url:"fields[gameCenterLeaderboards],omitempty"`
+	FilterGameCenterDetails          []string `url:"filter[gameCenterDetails],omitempty"`
+	Include                          []string `url:"include,omitempty"`
+	Limit                            int      `url:"limit,omitempty"`
+	LimitGameCenterAchievements      int      `url:"limit[gameCenterAchievements],omitempty"`
+	LimitGameCenterDetails           int      `url:"limit[gameCenterDetails],omitempty"`
+	LimitGameCenterLeaderboardSets   int      `url:"limit[gameCenterLeaderboardSets],omitempty"`
+	LimitGameCenterLeaderboardSetsV2 int      `url:"limit[gameCenterLeaderboardSetsV2],omitempty"`
+	LimitGameCenterLeaderboards      int      `url:"limit[gameCenterLeaderboards],omitempty"`
+	LimitGameCenterLeaderboardsV2    int      `url:"limit[gameCenterLeaderboardsV2],omitempty"`
+	Cursor                           string   `url:"cursor,omitempty"`
 }
 
 // GetGameCenterGroupQuery defines model for GetGameCenterGroup
 //
 // https://developer.apple.com/documentation/appstoreconnectapi/read_game_center_group_information
 type GetGameCenterGroupQuery struct {
-	FieldsGameCenterAchievements    []string `url:"fields[gameCenterAchievements],omitempty"`
-	FieldsGameCenterDetails         []string `url:"fields[gameCenterDetails],omitempty"`
-	FieldsGameCenterGroups          []string `url:"fields[gameCenterGroups],omitempty"`
-	FieldsGameCenterLeaderboardSets []string `url:"fields[gameCenterLeaderboardSets],omitempty"`
-	FieldsGameCenterLeaderboards    []string `url:"fields[gameCenterLeaderboards],omitempty"`
-	Include                         []string `url:"include,omitempty"`
-	LimitGameCenterAchievements     int      `url:"limit[gameCenterAchievements],omitempty"`
-	LimitGameCenterDetails          int      `url:"limit[gameCenterDetails],omitempty"`
-	LimitGameCenterLeaderboardSets  int      `url:"limit[gameCenterLeaderboardSets],omitempty"`
-	LimitGameCenterLeaderboards     int      `url:"limit[gameCenterLeaderboards],omitempty"`
+	FieldsGameCenterAchievements     []string `url:"fields[gameCenterAchievements],omitempty"`
+	FieldsGameCenterDetails          []string `url:"fields[gameCenterDetails],omitempty"`
+	FieldsGameCenterGroups           []string `url:"fields[gameCenterGroups],omitempty"`
+	FieldsGameCenterLeaderboardSets  []string `url:"fields[gameCenterLeaderboardSets],omitempty"`
+	FieldsGameCenterLeaderboards     []string `url:"fields[gameCenterLeaderboards],omitempty"`
+	Include                          []string `url:"include,omitempty"`
+	LimitGameCenterAchievements      int      `url:"limit[gameCenterAchievements],omitempty"`
+	LimitGameCenterDetails           int      `url:"limit[gameCenterDetails],omitempty"`
+	LimitGameCenterLeaderboardSets   int      `url:"limit[gameCenterLeaderboardSets],omitempty"`
+	LimitGameCenterLeaderboardSetsV2 int      `url:"limit[gameCenterLeaderboardSetsV2],omitempty"`
+	LimitGameCenterLeaderboards      int      `url:"limit[gameCenterLeaderboards],omitempty"`
+	LimitGameCenterLeaderboardsV2    int      `url:"limit[gameCenterLeaderboardsV2],omitempty"`
 }
 
 // ListGameCenterGroups lists all Game Center groups.

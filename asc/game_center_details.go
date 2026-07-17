@@ -51,17 +51,19 @@ type GameCenterDetailAttributes struct {
 //
 // https://developer.apple.com/documentation/appstoreconnectapi/gamecenterdetail/relationships
 type GameCenterDetailRelationships struct {
-	AchievementReleases       *PagedRelationship `json:"achievementReleases,omitempty"`
-	App                       *Relationship      `json:"app,omitempty"`
-	DefaultGroupLeaderboard   *Relationship      `json:"defaultGroupLeaderboard,omitempty"`
-	DefaultLeaderboard        *Relationship      `json:"defaultLeaderboard,omitempty"`
-	GameCenterAchievements    *PagedRelationship `json:"gameCenterAchievements,omitempty"`
-	GameCenterAppVersions     *PagedRelationship `json:"gameCenterAppVersions,omitempty"`
-	GameCenterGroup           *Relationship      `json:"gameCenterGroup,omitempty"`
-	GameCenterLeaderboardSets *PagedRelationship `json:"gameCenterLeaderboardSets,omitempty"`
-	GameCenterLeaderboards    *PagedRelationship `json:"gameCenterLeaderboards,omitempty"`
-	LeaderboardReleases       *PagedRelationship `json:"leaderboardReleases,omitempty"`
-	LeaderboardSetReleases    *PagedRelationship `json:"leaderboardSetReleases,omitempty"`
+	AchievementReleases         *PagedRelationship `json:"achievementReleases,omitempty"`
+	App                         *Relationship      `json:"app,omitempty"`
+	DefaultGroupLeaderboard     *Relationship      `json:"defaultGroupLeaderboard,omitempty"`
+	DefaultLeaderboard          *Relationship      `json:"defaultLeaderboard,omitempty"`
+	GameCenterAchievements      *PagedRelationship `json:"gameCenterAchievements,omitempty"`
+	GameCenterAppVersions       *PagedRelationship `json:"gameCenterAppVersions,omitempty"`
+	GameCenterGroup             *Relationship      `json:"gameCenterGroup,omitempty"`
+	GameCenterLeaderboardSets   *PagedRelationship `json:"gameCenterLeaderboardSets,omitempty"`
+	GameCenterLeaderboardSetsV2 *PagedRelationship `json:"gameCenterLeaderboardSetsV2,omitempty"`
+	GameCenterLeaderboards      *PagedRelationship `json:"gameCenterLeaderboards,omitempty"`
+	GameCenterLeaderboardsV2    *PagedRelationship `json:"gameCenterLeaderboardsV2,omitempty"`
+	LeaderboardReleases         *PagedRelationship `json:"leaderboardReleases,omitempty"`
+	LeaderboardSetReleases      *PagedRelationship `json:"leaderboardSetReleases,omitempty"`
 }
 
 // gameCenterDetailCreateRequest defines model for GameCenterDetailCreateRequest.
@@ -118,6 +120,20 @@ type GameCenterDetailResponse struct {
 // in a GameCenterDetailResponse.
 type GameCenterDetailResponseIncluded included
 
+// UnmarshalJSON is a custom unmarshaller for the heterogenous data stored in GameCenterDetailResponseIncluded.
+func (i *GameCenterDetailResponseIncluded) UnmarshalJSON(b []byte) error {
+	typeName, inner, err := unmarshalInclude(b)
+	i.Type = typeName
+	i.inner = inner
+
+	return err
+}
+
+// GameCenterLeaderboard returns the GameCenterLeaderboard stored within, if one is present.
+func (i *GameCenterDetailResponseIncluded) GameCenterLeaderboard() *GameCenterLeaderboard {
+	return extractIncludedGameCenterLeaderboard(i.inner)
+}
+
 // GetGameCenterDetailQuery defines model for GetGameCenterDetail
 //
 // https://developer.apple.com/documentation/appstoreconnectapi/read_game_center_details
@@ -136,7 +152,9 @@ type GetGameCenterDetailQuery struct {
 	LimitGameCenterAchievements            int      `url:"limit[gameCenterAchievements],omitempty"`
 	LimitGameCenterAppVersions             int      `url:"limit[gameCenterAppVersions],omitempty"`
 	LimitGameCenterLeaderboardSets         int      `url:"limit[gameCenterLeaderboardSets],omitempty"`
+	LimitGameCenterLeaderboardSetsV2       int      `url:"limit[gameCenterLeaderboardSetsV2],omitempty"`
 	LimitGameCenterLeaderboards            int      `url:"limit[gameCenterLeaderboards],omitempty"`
+	LimitGameCenterLeaderboardsV2          int      `url:"limit[gameCenterLeaderboardsV2],omitempty"`
 	LimitLeaderboardReleases               int      `url:"limit[leaderboardReleases],omitempty"`
 	LimitLeaderboardSetReleases            int      `url:"limit[leaderboardSetReleases],omitempty"`
 }
@@ -159,7 +177,9 @@ type GetGameCenterDetailForAppQuery struct {
 	LimitGameCenterAchievements            int      `url:"limit[gameCenterAchievements],omitempty"`
 	LimitGameCenterAppVersions             int      `url:"limit[gameCenterAppVersions],omitempty"`
 	LimitGameCenterLeaderboardSets         int      `url:"limit[gameCenterLeaderboardSets],omitempty"`
+	LimitGameCenterLeaderboardSetsV2       int      `url:"limit[gameCenterLeaderboardSetsV2],omitempty"`
 	LimitGameCenterLeaderboards            int      `url:"limit[gameCenterLeaderboards],omitempty"`
+	LimitGameCenterLeaderboardsV2          int      `url:"limit[gameCenterLeaderboardsV2],omitempty"`
 	LimitLeaderboardReleases               int      `url:"limit[leaderboardReleases],omitempty"`
 	LimitLeaderboardSetReleases            int      `url:"limit[leaderboardSetReleases],omitempty"`
 }
