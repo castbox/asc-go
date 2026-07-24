@@ -41,7 +41,7 @@ type GameCenterLeaderboardVersion struct {
 // https://developer.apple.com/documentation/appstoreconnectapi/gamecenterleaderboardversionv2/attributes
 type GameCenterLeaderboardVersionAttributes struct {
 	State   *string `json:"state,omitempty"`
-	Version *string `json:"version,omitempty"`
+	Version *int64  `json:"version,omitempty"`
 }
 
 // GameCenterLeaderboardVersionRelationships defines model for GameCenterLeaderboardVersion.Relationships

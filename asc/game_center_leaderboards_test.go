@@ -329,6 +329,33 @@ func TestGetGameCenterLeaderboardVersion(t *testing.T) {
 	})
 }
 
+func TestGetGameCenterLeaderboardVersionDecodesNumericVersion(t *testing.T) {
+	t.Parallel()
+
+	version := int64(1)
+	testEndpointWithResponse(t, `{
+		"data": {
+			"type": "gameCenterLeaderboardVersions",
+			"id": "10",
+			"attributes": {
+				"state": "PREPARE_FOR_SUBMISSION",
+				"version": 1
+			}
+		}
+	}`, &GameCenterLeaderboardVersionResponse{
+		Data: GameCenterLeaderboardVersion{
+			Attributes: &GameCenterLeaderboardVersionAttributes{
+				State:   String("PREPARE_FOR_SUBMISSION"),
+				Version: &version,
+			},
+			ID:   "10",
+			Type: "gameCenterLeaderboardVersions",
+		},
+	}, func(ctx context.Context, client *Client) (interface{}, *Response, error) {
+		return client.GameCenter.GetGameCenterLeaderboardVersion(ctx, "10", nil)
+	})
+}
+
 func TestListGameCenterLeaderboardVersionsForLeaderboard(t *testing.T) {
 	t.Parallel()
 
