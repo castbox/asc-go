@@ -22,6 +22,7 @@ package asc
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -157,6 +158,8 @@ func TestGameCenterLeaderboardV2EndpointPaths(t *testing.T) {
 
 func TestCreateGameCenterLeaderboardRequestBody(t *testing.T) {
 	t.Parallel()
+	scoreRangeEnd := int64(1000)
+	scoreRangeStart := int64(-1000)
 
 	var gotBody string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -179,6 +182,8 @@ func TestCreateGameCenterLeaderboardRequestBody(t *testing.T) {
 		VendorIdentifier: "com.example.leaderboard1",
 		ScoreSortType:    "DESC",
 		SubmissionType:   "BEST_SCORE",
+		ScoreRangeEnd:    &scoreRangeEnd,
+		ScoreRangeStart:  &scoreRangeStart,
 	}, "gameCenterDetailID")
 	assert.NoError(t, err)
 
@@ -189,7 +194,9 @@ func TestCreateGameCenterLeaderboardRequestBody(t *testing.T) {
 				"referenceName": "Test Leaderboard",
 				"vendorIdentifier": "com.example.leaderboard1",
 				"scoreSortType": "DESC",
-				"submissionType": "BEST_SCORE"
+				"submissionType": "BEST_SCORE",
+				"scoreRangeEnd": 1000,
+				"scoreRangeStart": -1000
 			},
 			"relationships": {
 				"gameCenterDetail": {
@@ -269,6 +276,90 @@ func TestGetGameCenterLeaderboard(t *testing.T) {
 	testEndpointWithResponse(t, "{}", &GameCenterLeaderboardResponse{}, func(ctx context.Context, client *Client) (interface{}, *Response, error) {
 		return client.GameCenter.GetGameCenterLeaderboard(ctx, "10", &GetGameCenterLeaderboardQuery{})
 	})
+}
+
+func TestListGameCenterLeaderboardsForDetailDecodesStringScoreRanges(t *testing.T) {
+	t.Parallel()
+
+	scoreRangeEnd := int64(9223372036854775807)
+	scoreRangeStart := int64(-9223372036854775808)
+	vendorIdentifier := "com.example.leaderboard1"
+	testEndpointWithResponse(t, `{
+		"data": [{
+			"type": "gameCenterLeaderboards",
+			"id": "leaderboardID",
+			"attributes": {
+				"scoreRangeEnd": "9223372036854775807",
+				"scoreRangeStart": "-9223372036854775808",
+				"vendorIdentifier": "com.example.leaderboard1"
+			}
+		}]
+	}`, &GameCenterLeaderboardsResponse{
+		Data: []GameCenterLeaderboard{{
+			Attributes: &GameCenterLeaderboardAttributes{
+				ScoreRangeEnd:    &scoreRangeEnd,
+				ScoreRangeStart:  &scoreRangeStart,
+				VendorIdentifier: &vendorIdentifier,
+			},
+			ID:   "leaderboardID",
+			Type: "gameCenterLeaderboards",
+		}},
+	}, func(ctx context.Context, client *Client) (interface{}, *Response, error) {
+		return client.GameCenter.ListGameCenterLeaderboardsForDetail(ctx, "gameCenterDetailID", nil)
+	})
+}
+
+func TestGameCenterLeaderboardAttributesDecodesScoreRangeVariants(t *testing.T) {
+	t.Parallel()
+	scoreRangeEnd := int64(100)
+	scoreRangeStart := int64(-10)
+
+	tests := []struct {
+		name      string
+		input     string
+		wantStart *int64
+		wantEnd   *int64
+		wantError bool
+	}{
+		{
+			name:      "numbers",
+			input:     `{"scoreRangeStart":-10,"scoreRangeEnd":100}`,
+			wantStart: &scoreRangeStart,
+			wantEnd:   &scoreRangeEnd,
+		},
+		{
+			name:      "numeric strings",
+			input:     `{"scoreRangeStart":"-10","scoreRangeEnd":"100"}`,
+			wantStart: &scoreRangeStart,
+			wantEnd:   &scoreRangeEnd,
+		},
+		{
+			name:  "nulls",
+			input: `{"scoreRangeStart":null,"scoreRangeEnd":null}`,
+		},
+		{
+			name:      "invalid numeric string",
+			input:     `{"scoreRangeStart":"invalid"}`,
+			wantError: true,
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			var attributes GameCenterLeaderboardAttributes
+			err := json.Unmarshal([]byte(tc.input), &attributes)
+			if tc.wantError {
+				assert.Error(t, err)
+				return
+			}
+			assert.NoError(t, err)
+			assert.Equal(t, tc.wantStart, attributes.ScoreRangeStart)
+			assert.Equal(t, tc.wantEnd, attributes.ScoreRangeEnd)
+		})
+	}
 }
 
 func TestUpdateGameCenterLeaderboard(t *testing.T) {

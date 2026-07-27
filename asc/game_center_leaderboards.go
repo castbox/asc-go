@@ -21,8 +21,11 @@ along with asc-go.  If not, see <http://www.gnu.org/licenses/>.
 package asc
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"strconv"
 )
 
 // StringToStringMap defines model for StringToStringMap.
@@ -58,6 +61,62 @@ type GameCenterLeaderboardAttributes struct {
 	SubmissionType      *string            `json:"submissionType,omitempty"`
 	VendorIdentifier    *string            `json:"vendorIdentifier,omitempty"`
 	Visibility          *string            `json:"visibility,omitempty"`
+}
+
+// UnmarshalJSON accepts the numeric strings returned by App Store Connect for score ranges.
+func (a *GameCenterLeaderboardAttributes) UnmarshalJSON(data []byte) error {
+	type attributesAlias GameCenterLeaderboardAttributes
+	decoded := struct {
+		*attributesAlias
+		ScoreRangeEnd   json.RawMessage `json:"scoreRangeEnd"`
+		ScoreRangeStart json.RawMessage `json:"scoreRangeStart"`
+	}{
+		attributesAlias: (*attributesAlias)(a),
+	}
+
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+
+	var err error
+	if len(decoded.ScoreRangeEnd) > 0 {
+		a.ScoreRangeEnd, err = decodeNullableInt64(decoded.ScoreRangeEnd)
+		if err != nil {
+			return fmt.Errorf("decode scoreRangeEnd: %w", err)
+		}
+	}
+	if len(decoded.ScoreRangeStart) > 0 {
+		a.ScoreRangeStart, err = decodeNullableInt64(decoded.ScoreRangeStart)
+		if err != nil {
+			return fmt.Errorf("decode scoreRangeStart: %w", err)
+		}
+	}
+
+	return nil
+}
+
+func decodeNullableInt64(data []byte) (*int64, error) {
+	data = bytes.TrimSpace(data)
+	if bytes.Equal(data, []byte("null")) {
+		return nil, nil
+	}
+
+	var value int64
+	if len(data) > 0 && data[0] == '"' {
+		var stringValue string
+		if err := json.Unmarshal(data, &stringValue); err != nil {
+			return nil, err
+		}
+		parsed, err := strconv.ParseInt(stringValue, 10, 64)
+		if err != nil {
+			return nil, err
+		}
+		value = parsed
+	} else if err := json.Unmarshal(data, &value); err != nil {
+		return nil, err
+	}
+
+	return &value, nil
 }
 
 // GameCenterLeaderboardRelationships defines model for GameCenterLeaderboard.Relationships
